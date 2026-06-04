@@ -4,10 +4,10 @@ import { ApiProperty } from '@nestjs/swagger';
 export class CheckAlertDto {
   @ApiProperty({ 
     description: 'The platform the mobile app is running on', 
-    enum: ['android', 'ios'],
+    enum: ['android', 'ios','both'],
     example: 'android'
   })
-  @IsEnum(['android', 'ios'])
+  @IsEnum(['android', 'ios','both'])
   platform!: string;
 
   @ApiProperty({ 
@@ -16,4 +16,4 @@ export class CheckAlertDto {
   })
   @IsNumber()
   versionCode!: number;
-}
+}                                  

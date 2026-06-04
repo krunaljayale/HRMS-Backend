@@ -4,6 +4,16 @@ import * as bcrypt from 'bcryptjs';
 
 export type EmployeeDocument = Employee & Document;
 
+// ── ENUMS FOR STRICT DATA TYPING ──
+export const DEPARTMENTS = [
+    'Engineering', 'Sales', 'Marketing', 'Finance', 'Operations', 'HR', 'IT', 'Accountant', 'Area Manager', 'Driver', 'Helper', 'Office Boy', 'Wealth Advisor', 'BDM' // Business Development Manager
+];
+
+export const POSITIONS = [
+    'Intern', 'Junior Developer', 'Software Developer', 'Tester', 'Android Developer', 'iOS Developer', 'App Developer', 'Senior Developer',
+    'Manager', 'Director', 'VP', 'General Manager', 'Specialist',
+    'HR Executive', 'System Administrator'
+];
 
 @Schema({ timestamps: true })
 export class Employee {
@@ -11,12 +21,16 @@ export class Employee {
     @Prop({ required: true, unique: true, uppercase: true, trim: true, match: /^IA\d{5}$/ })
     employeeCode!: string;
 
-    // ── ACCOUNT ──
-    @Prop({ required: true, minlength: 6 })
+    @Prop({ required: true, select: false })
     password!: string;
 
-    @Prop({ required: true, enum: ['Manager', 'Director', 'VP', 'GM', 'Employee', 'Intern', 'fresher'], default: 'Employee' })
+    // ── ACCOUNT ACCESS LEVEL ──
+    @Prop({ required: true, enum: ['Director', 'HR', 'Employee'], default: 'Employee' })
     role!: string;
+
+    // ── TECHNICAL SYSTEM PRIVILEGES ──
+    @Prop({ default: false })
+    isAppAdmin!: boolean;
 
     @Prop({ enum: ['Active', 'Inactive'], default: 'Active' })
     status!: string;
@@ -81,10 +95,10 @@ export class Employee {
     @Prop()
     joiningDate?: Date;
 
-    @Prop({ trim: true })
+    @Prop({ trim: true, enum: DEPARTMENTS })
     department?: string;
 
-    @Prop({ trim: true })
+    @Prop({ trim: true, enum: POSITIONS })
     position?: string;
 
     @Prop()

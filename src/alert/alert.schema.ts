@@ -18,8 +18,8 @@ export class GlobalAlert {
   @Prop({ default: 'Update Now' })
   buttonText!: string;
 
-  @Prop()
-  buttonLink?: string; // Direct string link to App Store / Play Store
+  @Prop({ type: { android: String, ios: String }, _id: false })
+  buttonLink?: { android?: string; ios?: string };
 
   @Prop({ default: false })
   isSkippable!: boolean;
@@ -37,11 +37,12 @@ export class GlobalAlert {
   @Prop({ enum: ['android', 'ios', 'both'], required: true, default: 'both' })
   platform!: string;
 
-  @Prop()
-  minimumVersionCode?: number;
+  // Change from a single number to an object containing both platforms
+  @Prop({ type: { android: Number, ios: Number }, _id: false })
+  minimumVersionCode?: { android?: number; ios?: number };
 
-  @Prop()
-  maximumVersionCode?: number;
+  @Prop({ type: { android: Number, ios: Number }, _id: false })
+  maximumVersionCode?: { android?: number; ios?: number };
 }
 
 export const GlobalAlertSchema = SchemaFactory.createForClass(GlobalAlert);

@@ -1,0 +1,253 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import * as bcrypt from 'bcryptjs';
+
+export type EmployeeDocument = Employee & Document;
+
+
+@Schema({ timestamps: true })
+export class Employee {
+    // ── EMPLOYEE CODE ──
+    @Prop({ required: true, unique: true, uppercase: true, trim: true, match: /^IA\d{5}$/ })
+    employeeCode!: string;
+
+    // ── ACCOUNT ──
+    @Prop({ required: true, minlength: 6 })
+    password!: string;
+
+    @Prop({ required: true, enum: ['Manager', 'Director', 'VP', 'GM', 'Employee', 'Intern', 'fresher'], default: 'Employee' })
+    role!: string;
+
+    @Prop({ enum: ['Active', 'Inactive'], default: 'Active' })
+    status!: string;
+
+    @Prop()
+    deactivateReason?: string;
+
+    // ── BASIC DETAILS ──
+    @Prop({ required: true, trim: true })
+    name!: string;
+
+    @Prop({ required: true, unique: true, lowercase: true, trim: true })
+    email!: string;
+
+    @Prop({ required: true, trim: true })
+    mobileNumber!: string;
+
+    @Prop({ trim: true })
+    alternateMobileNumber?: string;
+
+    @Prop({ enum: ['Male', 'Female', 'Other'] })
+    gender?: string;
+
+    @Prop({ enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] })
+    bloodGroup?: string;
+
+    @Prop()
+    dateOfBirth?: Date;
+
+    @Prop({ enum: ['Single', 'Married', 'Divorced', 'Widowed'] })
+    maritalStatus?: string;
+
+    @Prop()
+    profileImageUrl?: string;
+
+    @Prop({ type: [Number] })
+    faceDescriptor?: number[];
+
+    // ── PERSONAL DETAILS ──
+    @Prop({ trim: true })
+    fatherName?: string;
+
+    @Prop({ trim: true })
+    motherName?: string;
+
+    @Prop()
+    currentAddress?: string;
+
+    @Prop()
+    permanentAddress?: string;
+
+    @Prop()
+    district?: string;
+
+    @Prop()
+    state?: string;
+
+    @Prop()
+    pincode?: string;
+
+    // ── JOB DETAILS ──
+    @Prop()
+    joiningDate?: Date;
+
+    @Prop({ trim: true })
+    department?: string;
+
+    @Prop({ trim: true })
+    position?: string;
+
+    @Prop()
+    salary?: number;
+
+    @Prop({ type: [{ type: Types.ObjectId, ref: 'Employee' }] })
+    managerIds!: Types.ObjectId[];
+
+    // ── EXPERIENCE ──
+    @Prop({ enum: ['Fresher', 'Experienced'] })
+    experienceType?: string;
+
+    @Prop()
+    totalExperienceYears?: number;
+
+    @Prop()
+    lastCompanyName?: string;
+
+    @Prop()
+    experienceCertificateUrl?: string;
+
+    // ── EDUCATION ──
+    @Prop()
+    hscPercent?: number;
+
+    @Prop()
+    graduationCourse?: string;
+
+    @Prop()
+    graduationPercent?: number;
+
+    @Prop()
+    postGraduationCourse?: string;
+
+    @Prop()
+    postGraduationPercent?: number;
+
+    // ── DOCS ──
+    @Prop()
+    aadhaarNumber?: string;
+
+    @Prop()
+    panNumber?: string;
+
+    @Prop()
+    aadhaarFileUrl?: string;
+
+    @Prop()
+    panFileUrl?: string;
+
+    @Prop()
+    passbookFileUrl?: string;
+
+    @Prop()
+    tenthMarksheetUrl?: string;
+
+    @Prop()
+    twelfthMarksheetUrl?: string;
+
+    @Prop()
+    graduationMarksheetUrl?: string;
+
+    @Prop()
+    postGraduationMarksheetUrl?: string;
+
+    @Prop()
+    medicalDocumentUrl?: string;
+
+    // ── BANK DETAILS ──
+    @Prop()
+    accountHolderName?: string;
+
+    @Prop()
+    bankName?: string;
+
+    @Prop()
+    accountNumber?: string;
+
+    @Prop()
+    ifsc?: string;
+
+    @Prop()
+    branch?: string;
+
+    @Prop({ default: false })
+    bankVerified!: boolean;
+
+    @Prop()
+    bankVerifiedDate?: Date;
+
+    // ── VERIFICATION ──
+    @Prop({ default: false })
+    aadhaarVerified!: boolean;
+
+    @Prop({ default: false })
+    panVerified!: boolean;
+
+    @Prop()
+    aadhaarVerifiedDate?: Date;
+
+    @Prop()
+    panVerifiedDate?: Date;
+
+    // ── EMERGENCY CONTACT ──
+    @Prop()
+    emergencyContactName?: string;
+
+    @Prop()
+    emergencyContactRelationship?: string;
+
+    @Prop()
+    emergencyContactMobile?: string;
+
+    @Prop()
+    emergencyContactAddress?: string;
+
+    // ── HEALTH ──
+    @Prop({ enum: ['Yes', 'No'], default: 'No' })
+    hasDisease!: string;
+
+    @Prop()
+    diseaseName?: string;
+
+    @Prop()
+    diseaseType?: string;
+
+    @Prop()
+    diseaseSince?: string;
+
+    @Prop()
+    medicinesRequired?: string;
+
+    @Prop()
+    doctorName?: string;
+
+    @Prop()
+    doctorContact?: string;
+
+    // ── LEAVE BALANCES ──
+    @Prop({ default: 0 })
+    compOffBalance!: number;
+
+    @Prop({ default: 0 })
+    paidLeaveBalance!: number;
+
+    @Prop()
+    lastLeaveAccrualDate?: Date;
+
+    @Prop()
+    lastWorkingDate?: Date;
+
+    // ── REFRESH & NOTIFICATIONS ──
+    @Prop()
+    refreshToken?: string;
+
+    @Prop()
+    fcmToken?: string;
+}
+
+export const EmployeeSchema = SchemaFactory.createForClass(Employee);
+
+// ── HASH PASSWORD HOOK ──
+EmployeeSchema.pre<EmployeeDocument>('save', async function () {
+    if (!this.isModified('password')) return;
+    this.password = await bcrypt.hash(this.password, 12);
+});

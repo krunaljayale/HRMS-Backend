@@ -7,6 +7,8 @@ import { EmployeeModule } from './employee/employee.module';
 import { LeaveModule } from './leave/leave.module';
 import { AlertModule } from './alert/alert.module';
 import { AuthModule } from './auth/auth.module';
+import { GurukulModule } from './gurukul/gurukul.module';
+import { ComplaintModule } from './complaint/complaint.module';
 
 @Module({
   imports: [
@@ -32,6 +34,10 @@ import { AuthModule } from './auth/auth.module';
     AlertModule,
 
     AuthModule,
+
+    GurukulModule,
+
+    ComplaintModule,
   ],
   controllers: [AppController],
   providers: [AppService],

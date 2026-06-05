@@ -1,6 +1,8 @@
-import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query, Request, UseGuards } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
+import { GetDirectoryDto } from './dto/get-directory.dto';
 
 @Controller('api/app/employee')
 export class EmployeeAppController {
@@ -23,6 +25,42 @@ export class EmployeeAppController {
             success: true,
             message: 'Profile fetched successfully',
             data: profile,
+        };
+    }
+
+    @Patch('profile/fcm-token')
+    @UseGuards(JwtAuthGuard)
+    async updateFcmToken(
+        @Request() req: any,
+        @Body() updateFcmTokenDto: UpdateFcmTokenDto
+    ) {
+        // Securely grab the ID from the JWT payload
+        const userId = req.user.employeeId;
+
+        // Pass the data to the service
+        await this.employeeService.updateFcmToken(userId, updateFcmTokenDto);
+
+        // Return a 200 OK success response to React Native
+        return {
+            success: true,
+            message: 'FCM token updated successfully',
+        };
+    }
+
+
+    // ── GET DIRECTORY ROUTE ──
+    @Get('directory')
+    @UseGuards(JwtAuthGuard)
+    async getDirectory(@Query() queryDto: GetDirectoryDto) {
+
+        // 1. Fetch data from service
+        const directoryData = await this.employeeService.getEmployeeDirectory(queryDto);
+
+        // 2. Return standard JSON envelope to match your frontend interceptor
+        return {
+            success: true,
+            message: 'Employee directory fetched successfully',
+            data: directoryData,
         };
     }
 }

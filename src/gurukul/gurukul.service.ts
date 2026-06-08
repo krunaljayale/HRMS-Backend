@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { type PaginateModel } from 'mongoose';
-import { Video, VideoDocument } from './schema/video.schema';
+import { Video, VideoDocument } from './schemas/video.schema';
 import { GetVideosDto } from './dto/get-videos.dto';
 
 @Injectable()

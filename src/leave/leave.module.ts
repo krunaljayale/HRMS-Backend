@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { LeaveService } from './leave.service';
 import { LeaveAppController } from './leave.controller';
-import { LeaveHistory, LeaveHistorySchema } from './leave.schema';
+import { LeaveHistory, LeaveHistorySchema } from './schemas/leave.schema';
 
 @Module({
   imports: [

@@ -16,7 +16,7 @@ export const POSITIONS = [
 ];
 
 @Schema({ timestamps: true })
-export class Employee {
+export class Employee extends Document {
     // ── EMPLOYEE CODE ──
     @Prop({ required: true, unique: true, uppercase: true, trim: true, match: /^IA\d{5}$/ })
     employeeCode!: string;
@@ -45,7 +45,7 @@ export class Employee {
     @Prop({ required: true, unique: true, lowercase: true, trim: true })
     email!: string;
 
-    @Prop({ required: true, trim: true })
+    @Prop({ required: true, trim: true,index: true })
     mobileNumber!: string;
 
     @Prop({ trim: true })

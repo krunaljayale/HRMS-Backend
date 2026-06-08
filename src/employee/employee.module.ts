@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EmployeeService } from './employee.service';
 import { EmployeeWebController } from './employee.web.controller';
-import { Employee, EmployeeSchema } from './employee.schema';
+import { Employee, EmployeeSchema } from './schemas/employee.schema';
 import { EmployeeAppController } from './employee.app.controller';
 
 @Module({

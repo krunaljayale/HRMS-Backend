@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { GlobalAlert, GlobalAlertDocument } from './alert.schema';
+import { GlobalAlert, GlobalAlertDocument } from './schemas/alert.schema';
 import { UpsertAlertDto } from './dto/upsert-alert.dto';
 import { CheckAlertDto } from './dto/check-alert.dto';
 import { EmployeeService } from '../employee/employee.service';
@@ -31,7 +31,7 @@ export class AlertService {
     const requestorRole = employee.role;
     const isAppAdmin = employee.isAppAdmin;
 
-    // 🛑 RULE 1: Technical Updates (Force / Optional)
+    //  RULE 1: Technical Updates (Force / Optional)
     if (alertData.type === 'force_update' || alertData.type === 'optional_update' || alertData.type === 'maintenance') {
       if (!isAppAdmin) {
         throw new UnauthorizedException(
@@ -40,14 +40,14 @@ export class AlertService {
       }
     }
 
-    // 🛑 RULE 2: HR Announcements (Info / Promo )
+    //  RULE 2: HR Announcements (Info / Promo )
     if (!isAppAdmin && requestorRole !== 'HR') {
       throw new UnauthorizedException(
         'You must be an HR Administrator to post company announcements.'
       );
     }
 
-    // ✅ Save to database
+    //  Save to database
     return this.alertModel.findOneAndUpdate(
       { type: alertData.type },
       { $set: alertData },

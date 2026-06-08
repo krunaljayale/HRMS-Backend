@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Employee, EmployeeDocument } from './employee.schema';
-import { Model } from 'mongoose';
+import { Employee, EmployeeDocument } from './schemas/employee.schema';
+import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
@@ -59,6 +59,24 @@ export class EmployeeService {
         }
 
         return employee;
+    }
+
+    async getReportingManagers(managerIds: Types.ObjectId[]) {
+        // 1. Return early if the array is empty to prevent unnecessary DB calls
+        if (!managerIds || managerIds.length === 0) {
+            return [];
+        }
+
+        // 2. Fetch all managers in one single query using $in
+        const managers = await this.employeeModel.find({
+            _id: { $in: managerIds },
+            status: 'Active' // Safety check so you don't show deactivated managers
+        })
+            .select('_id name position') // Only pull the lightweight fields needed for UI badges
+            .lean()
+            .exec();
+
+        return managers;
     }
 
     // ── UPDATE FCM TOKEN ──
@@ -132,4 +150,85 @@ export class EmployeeService {
         };
     }
 
+    async getUpcomingBirthdays() {
+        // 1. Calculate the target dates
+        const today = new Date();
+
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+
+        const dayAfterTomorrow = new Date(today);
+        dayAfterTomorrow.setDate(today.getDate() + 2);
+
+        // 2. Map them into an array for easy matching
+        const targetDates = [
+            { label: 'today', month: today.getMonth() + 1, day: today.getDate() },
+            { label: 'tomorrow', month: tomorrow.getMonth() + 1, day: tomorrow.getDate() },
+            { label: 'dayAfter', month: dayAfterTomorrow.getMonth() + 1, day: dayAfterTomorrow.getDate() }
+        ];
+
+        // 3. Build the MongoDB $or array dynamically
+        const matchConditions = targetDates.map(d => ({
+            birthMonth: d.month,
+            birthDay: d.day
+        }));
+
+        // 4. Run the Aggregation Pipeline
+        const employees = await this.employeeModel.aggregate([
+            {
+                $match: {
+                    status: 'Active',
+                    dateOfBirth: { $exists: true } // Removed strict $type check
+                }
+            },
+            {
+                //  NEW STAGE: Safely parse Strings into Dates on the fly
+                $addFields: {
+                    parsedDOB: { $toDate: '$dateOfBirth' }
+                }
+            },
+            {
+                $project: {
+                    _id: 1,
+                    name: 1,
+                    employeeCode: 1,
+                    profileImageUrl: 1,
+                    department: 1,
+                    dateOfBirth: 1,
+                    //  Use the parsedDOB for calculations
+                    birthMonth: { $month: '$parsedDOB' },
+                    birthDay: { $dayOfMonth: '$parsedDOB' }
+                }
+            },
+            {
+                $match: {
+                    $or: matchConditions
+                }
+            }
+        ]);
+
+        // 5. Initialize the structured return object
+        const result = {
+            today: [] as any[],
+            tomorrow: [] as any[],
+            upcoming: [] as any[]
+        };
+
+        // 6. Group the results
+        employees.forEach(emp => {
+            if (emp.birthMonth === targetDates[0].month && emp.birthDay === targetDates[0].day) {
+                result.today.push(emp);
+            } else if (emp.birthMonth === targetDates[1].month && emp.birthDay === targetDates[1].day) {
+                result.tomorrow.push(emp);
+            } else {
+                result.upcoming.push(emp);
+            }
+
+            // Clean up the temporary aggregation fields before sending to frontend
+            delete emp.birthMonth;
+            delete emp.birthDay;
+        });
+
+        return result;
+    }
 }

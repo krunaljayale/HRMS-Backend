@@ -63,4 +63,21 @@ export class EmployeeAppController {
             data: directoryData,
         };
     }
+
+    // ── UPCOMING BIRTHDAYS ROUTE ──
+    @Get('birthdays/upcoming')
+    @UseGuards(JwtAuthGuard)
+    async getBirthdays() {
+        // Fetch the split arrays from the service
+        const birthdayData = await this.employeeService.getUpcomingBirthdays();
+
+        // 2. Return standard JSON envelope
+        return {
+            success: true,
+            message: 'Upcoming birthdays fetched successfully',
+            data: birthdayData,
+        };
+    }
+
+
 }

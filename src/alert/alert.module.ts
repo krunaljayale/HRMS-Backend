@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AlertService } from './alert.service';
 import { AlertAppController } from './alert.app.controller';
-import { GlobalAlert, GlobalAlertSchema } from './alert.schema';
+import { GlobalAlert, GlobalAlertSchema } from './schemas/alert.schema';
 import { AlertWebController } from './alert.web.controller';
 import { EmployeeModule } from '../employee/employee.module';
 

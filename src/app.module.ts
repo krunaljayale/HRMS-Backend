@@ -9,6 +9,8 @@ import { AlertModule } from './alert/alert.module';
 import { AuthModule } from './auth/auth.module';
 import { GurukulModule } from './gurukul/gurukul.module';
 import { ComplaintModule } from './complaint/complaint.module';
+import { HolidayModule } from './holiday/holiday.module';
+import { AttendanceModule } from './attendance/attendance.module';
 
 @Module({
   imports: [
@@ -38,6 +40,10 @@ import { ComplaintModule } from './complaint/complaint.module';
     GurukulModule,
 
     ComplaintModule,
+
+    HolidayModule,
+
+    AttendanceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

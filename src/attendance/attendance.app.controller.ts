@@ -74,4 +74,18 @@ export class AttendanceAppController {
       message: 'Location tracked successfully',
     };
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('insights/performance')
+  async getPerformanceInsights(@Req() req: any) {
+    const employeeId = req.user.employeeId;
+
+    const insights = await this.attendanceService.getMonthlyPerformanceInsights(employeeId);
+
+    return {
+      statusCode: 200,
+      data: insights,
+      message: 'Performance insights retrieved successfully'
+    };
+  }
 }

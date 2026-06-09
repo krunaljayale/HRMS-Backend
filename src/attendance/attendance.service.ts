@@ -323,4 +323,60 @@ export class AttendanceService {
             console.log(`Tracking ignored: No active shift for employee ${fullEmployee.employeeCode} on ${dateString}`);
         }
     }
+
+    async getMonthlyPerformanceInsights(employeeId: string) {
+        // 1. Get the current date in 'YYYY-MM-DD' format
+        const todayStr = getIST('date'); // e.g., "2026-06-09"
+
+        // Extract year-month to create the prefix for the $regex
+        // This removes the need for manual date object construction
+        const currentMonthPrefix = todayStr.substring(0, 7); // "2026-06"
+
+        // 2. Run the aggregation
+        const insights = await this.attendanceModel.aggregate([
+            {
+                $match: {
+                    employeeId: new Types.ObjectId(employeeId),
+                    // Uses the exact same format as stored in your 'date' field
+                    date: { $regex: `^${currentMonthPrefix}` }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    presentCount: {
+                        $sum: { $cond: [{ $eq: ["$status", "P"] }, 1, 0] }
+                    },
+                    absentCount: {
+                        $sum: { $cond: [{ $eq: ["$status", "A"] }, 1, 0] }
+                    },
+                    lateCount: {
+                        $sum: { $cond: [{ $eq: ["$isLate", true] }, 1, 0] }
+                    },
+                    totalAccumulatedHours: {
+                        $sum: "$totalHours"
+                    }
+                }
+            }
+        ]);
+
+        // 3. Format the response exactly how your frontend InsightsData interface expects it
+        if (insights.length === 0) {
+            return { present: 0, absent: 0, late: 0, totalHours: 0 };
+        }
+
+        const data = insights[0];
+
+        // Calculate the daily average hours (Total Hours / Days Present)
+        const avgHours = data.presentCount > 0
+            ? parseFloat((data.totalAccumulatedHours / data.presentCount).toFixed(1))
+            : 0;
+
+        return {
+            present: data.presentCount,
+            absent: data.absentCount,
+            late: data.lateCount,
+            totalHours: avgHours
+        };
+    }
 }

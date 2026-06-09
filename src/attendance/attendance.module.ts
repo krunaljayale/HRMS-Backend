@@ -6,12 +6,14 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AttendanceSchema } from './schemas/attendance.schema';
 import { AttendanceAppController } from './attendance.app.controller';
 import { EmployeeModule } from '../employee/employee.module';
+import { LeaveModule } from '../leave/leave.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: 'Attendance', schema: AttendanceSchema }]),
     HolidayModule,
     EmployeeModule,
+    LeaveModule,
   ],
   controllers: [AttendanceAppController],
   providers: [AttendanceService],

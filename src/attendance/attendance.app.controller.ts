@@ -55,7 +55,7 @@ export class AttendanceAppController {
   @Get('reporting-managers')
   async getReportingManagers(@Req() req) {
     const employeeId = req.user.employeeId;
-    const data = await this.attendanceService.getReportingManagers(employeeId);
+    const data = await this.attendanceService.getReportingManager(employeeId);
     return {
       statusCode: 200,
       data: data,

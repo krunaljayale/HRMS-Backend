@@ -61,24 +61,6 @@ export class EmployeeService {
         return employee;
     }
 
-    async getReportingManagers(managerIds: Types.ObjectId[]) {
-        // 1. Return early if the array is empty to prevent unnecessary DB calls
-        if (!managerIds || managerIds.length === 0) {
-            return [];
-        }
-
-        // 2. Fetch all managers in one single query using $in
-        const managers = await this.employeeModel.find({
-            _id: { $in: managerIds },
-            status: 'Active' // Safety check so you don't show deactivated managers
-        })
-            .select('_id name position') // Only pull the lightweight fields needed for UI badges
-            .lean()
-            .exec();
-
-        return managers;
-    }
-
     // ── UPDATE FCM TOKEN ──
     async updateFcmToken(employeeId: string, fcmData: UpdateFcmTokenDto): Promise<void> {
         const updatedEmployee = await this.employeeModel.findByIdAndUpdate(

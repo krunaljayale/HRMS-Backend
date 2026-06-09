@@ -45,7 +45,7 @@ export class Employee extends Document {
     @Prop({ required: true, unique: true, lowercase: true, trim: true })
     email!: string;
 
-    @Prop({ required: true, trim: true,index: true })
+    @Prop({ required: true, trim: true, index: true })
     mobileNumber!: string;
 
     @Prop({ trim: true })
@@ -95,17 +95,21 @@ export class Employee extends Document {
     @Prop()
     joiningDate?: Date;
 
-    @Prop({ trim: true, enum: DEPARTMENTS })
+    @Prop({ trim: true })
     department?: string;
 
-    @Prop({ trim: true, enum: POSITIONS })
+    @Prop({ trim: true })
     position?: string;
+
+    @Prop({ type: Boolean, default: false })
+    isLeadershipRole!: boolean;
 
     @Prop()
     salary?: number;
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'Employee' }] })
-    managerIds!: Types.ObjectId[];
+    // ── DIRECT REPORTING SUPERVISOR ──
+    @Prop({ type: Types.ObjectId, ref: 'Employee', index: true })
+    managerId?: Types.ObjectId;
 
     // ── EXPERIENCE ──
     @Prop({ enum: ['Fresher', 'Experienced'] })

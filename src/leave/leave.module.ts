@@ -1,15 +1,23 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { LeaveService } from './leave.service';
-import { LeaveAppController } from './leave.controller';
-import { LeaveHistory, LeaveHistorySchema } from './schemas/leave.schema';
+import { LeaveAppController } from './leave.app.controller';
+import { LeaveLedger, LeaveLedgerSchema } from './schemas/leave-ledger.schema';
+import { LeaveHistory, LeaveHistorySchema } from './schemas/leave-history.schema';
+import { EmployeeModule } from '../employee/employee.module';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: LeaveHistory.name, schema: LeaveHistorySchema }]),
+    //  Register BOTH schemas in the same domain module
+    MongooseModule.forFeature([
+      { name: LeaveHistory.name, schema: LeaveHistorySchema },
+      { name: LeaveLedger.name, schema: LeaveLedgerSchema },
+    ]),
+
+    EmployeeModule,
   ],
   controllers: [LeaveAppController],
   providers: [LeaveService],
   exports: [LeaveService],
 })
-export class LeaveModule {}
+export class LeaveModule { }

@@ -1,4 +1,5 @@
 import { IsNumber, IsEnum, IsOptional, IsString, IsArray } from 'class-validator';
+import { Types } from 'mongoose';
 
 export class CheckInDto {
     @IsNumber()
@@ -26,8 +27,7 @@ export class CheckOutDto extends CheckInDto {
     @IsOptional()
     issuesFaced?: string;
 
-    @IsArray()
-    @IsString({ each: true }) // Validates that every item inside the array is a string
+    @IsString()
     @IsOptional()
-    reportParticipants!: string[];
+    reportParticipant!: Types.ObjectId;
 }

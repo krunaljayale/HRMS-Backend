@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AttendanceDocument } from './schemas/attendance.schema';
@@ -8,6 +8,7 @@ import { CheckInDto, CheckOutDto } from './dto/punch.dto';
 import { EmployeeService } from '../employee/employee.service';
 import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import { TrackLocationDto } from './dto/track-location.dto';
+import { LeaveService } from '../leave/leave.service';
 
 @Injectable()
 export class AttendanceService {
@@ -20,6 +21,7 @@ export class AttendanceService {
         @InjectModel('Attendance') private attendanceModel: Model<AttendanceDocument>,
         private holidayService: HolidayService,
         private employeeService: EmployeeService,
+        private leaveService: LeaveService,
     ) { }
 
     private validateLocation(
@@ -178,7 +180,7 @@ export class AttendanceService {
             // 8. Determine Shift Requirements using accurate IST day
             const istDateStr = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
             const dayOfWeek = new Date(istDateStr).getDay(); // 0 = Sunday, 6 = Saturday
-            const shiftMinutes = dayOfWeek === 6 ? 420 : 510; // Sat = 7 hrs, Mon-Fri = 8.5 hrs
+            const shiftMinutes = 510; //dayOfWeek === 6 ? 420 : 510; // Sat = 7 hrs, Mon-Fri = 8.5 hrs
 
             // 9. Overtime & Shortfall
             let overtimeMinutes = 0;
@@ -194,9 +196,9 @@ export class AttendanceService {
             const isHoliday = await this.holidayService.checkIsHoliday(dateString);
 
             if (isSunday || isHoliday) {
-                // STRICT COFF ENFORCEMENT: ALL OR NOTHING
+                // STRICT CompOff ENFORCEMENT: ALL OR NOTHING
                 if (totalMinutes >= shiftMinutes) {
-                    attendance.status = 'Coff'; // Full Comp Off Earned
+                    attendance.status = 'CompOff';
                 } else {
                     attendance.status = 'P';
                 }
@@ -208,9 +210,6 @@ export class AttendanceService {
                 if (totalMinutes >= shiftMinutes) {
                     attendance.status = 'P'; // Full Day
                 }
-                // GRACE PERIOD APPLIED HERE
-                // Example: If halfDayHurdle is 255 mins, and they worked 246 mins:
-                // 246 + 10 = 256 -> (256 >= 255) evaluates to TRUE. They get the Half Day!
                 else if ((totalMinutes + tenMinuteGrace) >= halfDayHurdle) {
                     attendance.status = 'Half'; // Half Day
                 }
@@ -230,13 +229,7 @@ export class AttendanceService {
             attendance.todayWork = dto.todayWork;
             attendance.pendingWork = dto.pendingWork;
             attendance.issuesFaced = dto.issuesFaced;
-
-            // Safely map frontend IDs to MongoDB ObjectIds
-            if (dto.reportParticipants && dto.reportParticipants.length > 0) {
-                attendance.reportParticipants = dto.reportParticipants.map(
-                    (id) => new Types.ObjectId(id)
-                );
-            }
+            attendance.reportParticipant = dto.reportParticipant
 
             // 13. Breadcrumb location
             if (dto.latitude != null && dto.longitude != null) {
@@ -250,8 +243,18 @@ export class AttendanceService {
                 });
             }
 
+            //  13.5 MINT COMP-OFF TOKEN IF EARNED 
+            if (attendance.status === 'CompOff') {
+                // Pass the session down so if the attendance save fails, the ledger creation rolls back!
+                await this.leaveService.createCompOff(
+                    jwtPayload.employeeId,
+                    { attendanceId: attendance._id.toString() },
+                    session // Pass the mongoose session (requires a small update to leave.service)
+                );
+            }
+
             // 14. SAVE WITH SESSION AND COMMIT
-            await attendance.save({ session }); // Critical: pass the session to the save method
+            await attendance.save({ session });
             await session.commitTransaction();
 
             return {
@@ -272,15 +275,23 @@ export class AttendanceService {
         }
     }
 
-    async getReportingManagers(employeeId: string) {
-        // 1. Get the employee and their manager array
-        const employee = await this.employeeService.getEmployeeById(employeeId, 'managerIds');
+    async getReportingManager(employeeId: string) {
+        const employee = await this.employeeService.getEmployeeById(employeeId, 'managerId');
 
-        // 2. Pass the array to your optimized fetcher
-        const managers = await this.employeeService.getReportingManagers(employee.managerIds);
+        if (!employee) {
+            throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+        }
 
-        return managers;
+        // 1. Check if managerId exists to satisfy the optional '?' type
+        if (!employee.managerId) {
+            return null;
+        }
 
+        // 2. Convert the ObjectId to a string using .toString()
+        const managerIdString = employee.managerId.toString();
+
+        // 3. Pass the string into the service
+        return this.employeeService.getEmployeeById(managerIdString, '_id name position');
     }
 
     async trackLocation(employeeId: string, dto: TrackLocationDto): Promise<void> {

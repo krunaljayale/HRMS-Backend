@@ -95,7 +95,7 @@ export class Attendance extends Document { // Extends Document for _id typings
 
     // ── STATUS ──
     @Prop({
-        enum: ['P', 'A', 'WO', 'L', 'Coff', 'AUTO', 'H', 'Half'],
+        enum: ['P', 'A', 'WO', 'L', 'CompOff', 'AUTO', 'H', 'Half'],
         default: 'P',
     })
     status!: string;
@@ -163,8 +163,8 @@ export class Attendance extends Document { // Extends Document for _id typings
     @Prop()
     issuesFaced?: string;
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'Employee' }], default: [] })
-    reportParticipants!: Types.ObjectId[];
+    @Prop({ type: Types.ObjectId, ref: 'Employee', index: true })
+    reportParticipant!: Types.ObjectId;
 
     @Prop({ type: [{ type: Types.ObjectId, ref: 'Employee' }], default: [] })
     reportReadBy?: Types.ObjectId[];

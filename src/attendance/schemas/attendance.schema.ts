@@ -47,10 +47,15 @@ export class CorrectionHistory {
     action!: string;
 
     @Prop({ required: true })
-    byRole!: string;
+    byRole!: string; // e.g., 'Employee' or 'HR'
 
+    //  Make Employee ID optional
     @Prop({ type: Types.ObjectId, ref: 'Employee' })
-    byEmployeeId!: Types.ObjectId;
+    byEmployeeId?: Types.ObjectId;
+
+    //  ADDED: Admin ID for HR actions
+    @Prop({ type: Types.ObjectId, ref: 'HumanResource' }) // Change 'HumanResource' to whatever your HR schema is called
+    byAdminId?: Types.ObjectId;
 
     @Prop()
     remark!: string;
@@ -133,15 +138,7 @@ export class Attendance extends Document { // Extends Document for _id typings
     correctionRequested?: boolean;
 
     @Prop({
-        enum: [
-            'None',
-            'Pending_HR',
-            'Pending_GM',
-            'Pending_VP',
-            'Pending_Director',
-            'Approved',
-            'Rejected',
-        ],
+        enum: ['None', 'Pending', 'Approved', 'Rejected'],
         default: 'None',
     })
     correctionStatus?: string;
@@ -151,7 +148,7 @@ export class Attendance extends Document { // Extends Document for _id typings
     activeCorrectionRequest?: CorrectionRequestData;
 
     @Prop({ type: [CorrectionHistorySchema], default: [] })
-    correctionHistory?: CorrectionHistory[];
+    correctionHistory!: CorrectionHistory[];
 
     // ── REPORTS ──
     @Prop()

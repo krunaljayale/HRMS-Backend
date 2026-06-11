@@ -25,7 +25,7 @@ export class Employee extends Document {
     password!: string;
 
     // ── ACCOUNT ACCESS LEVEL ──
-    @Prop({ required: true, enum: ['Director', 'HR', 'Employee'], default: 'Employee' })
+    @Prop({ required: true, enum: ['Employee'], default: 'Employee' })
     role!: string;
 
     // ── TECHNICAL SYSTEM PRIVILEGES ──
@@ -52,7 +52,7 @@ export class Employee extends Document {
     alternateMobileNumber?: string;
 
     @Prop({ enum: ['Male', 'Female', 'Other'] })
-    gender?: string;
+    gender!: string;
 
     @Prop({ enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] })
     bloodGroup?: string;
@@ -106,6 +106,16 @@ export class Employee extends Document {
 
     @Prop()
     salary?: number;
+
+    // ── PAYROLL POLICY ──
+    @Prop({
+        type: {
+            basicPercentage: { type: Number, default: 100 },
+            allowancePercentage: { type: Number, default: 0 }
+        },
+        default: { basicPercentage: 100, allowancePercentage: 0 }
+    })
+    salaryStructure!: { basicPercentage: number; allowancePercentage: number };
 
     // ── DIRECT REPORTING SUPERVISOR ──
     @Prop({ type: Types.ObjectId, ref: 'Employee', index: true })
@@ -192,6 +202,7 @@ export class Employee extends Document {
 
     @Prop()
     bankVerifiedDate?: Date;
+
 
     // ── VERIFICATION ──
     @Prop({ default: false })

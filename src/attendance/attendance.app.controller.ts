@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CheckInDto, CheckOutDto } from './dto/punch.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
+import { CorrectionRequestDto } from './dto/request-correction.dto';
 
 @Controller('api/app/attendance')
 export class AttendanceAppController {
@@ -65,7 +66,6 @@ export class AttendanceAppController {
 
   @UseGuards(JwtAuthGuard)
   @Post('track-location')
-  // @UseGuards(JwtAuthGuard) // Protect with your standard JWT guard
   async trackLocation(@Req() req, @Body() dto: TrackLocationDto) {
     await this.attendanceService.trackLocation(req.user.employeeId, dto);
 
@@ -86,6 +86,55 @@ export class AttendanceAppController {
       statusCode: 200,
       data: insights,
       message: 'Performance insights retrieved successfully'
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('monthly')
+  async getMonthlyAttendance(
+    @Req() req: any,
+    @Query('year') year: string,
+    @Query('month') month: string
+  ) {
+    const employeeId = req.user.employeeId || req.user.id;
+
+    // Fallback to current year/month if frontend doesn't provide them
+    const targetYear = year || new Date().getFullYear().toString();
+    const targetMonth = month || (new Date().getMonth() + 1).toString();
+
+    const data = await this.attendanceService.getMonthlyAttendanceList(
+      employeeId,
+      targetYear,
+      targetMonth
+    );
+
+    return {
+      statusCode: 200,
+      data: data,
+      message: 'Monthly attendance retrieved successfully'
+    };
+  }
+
+  // ─── REQUEST CORRECTION ───
+  @UseGuards(JwtAuthGuard)
+  @Post('correction/:id')
+  async requestCorrection(
+    @Req() req: any,
+    @Param('id') attendanceId: string,
+    @Body() dto: CorrectionRequestDto
+  ) {
+    const employeeId = req.user.employeeId;
+
+    const result = await this.attendanceService.requestCorrection(
+      attendanceId,
+      employeeId,
+      dto
+    );
+
+    return {
+      statusCode: 200,
+      data: result,
+      message: result.message,
     };
   }
 }

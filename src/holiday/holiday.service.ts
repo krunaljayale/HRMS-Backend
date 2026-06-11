@@ -65,4 +65,31 @@ export class HolidayService {
         });
         return !!holiday; // Returns true if found, false if not
     }
+
+    // Fetch all active holidays for a specific month to build calendars
+    async findHolidaysByMonth(year: number, month: number) {
+        // Note: JS Date months are 0-indexed, so month - 1
+        // We use UTC to match how you store them in checkIsHoliday
+        const startDate = new Date(Date.UTC(year, month - 1, 1));
+        const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+
+        return await this.holidayModel.find({
+            date: { $gte: startDate, $lte: endDate },
+            isActive: true
+        }).lean();
+    }
+
+    // ── PAYROLL ENGINE HELPER: FETCH HOLIDAYS IN RANGE ──
+    async findHolidaysInRange(fromDate: Date, toDate: Date): Promise<Holiday[]> {
+        return await this.holidayModel
+            .find({
+                date: {
+                    $gte: fromDate,
+                    $lte: toDate,
+                },
+                isActive: true, // Crucial: Ensures canceled holidays are not processed in payroll
+            })
+            .sort({ date: 1 }) // Sorted chronologically
+            .lean(); // Using .lean() for faster, lightweight plain JS objects since we don't need Mongoose instance methods here
+    }
 }

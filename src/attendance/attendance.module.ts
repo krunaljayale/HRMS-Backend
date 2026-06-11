@@ -14,8 +14,10 @@ import { LeaveModule } from '../leave/leave.module';
     HolidayModule,
     EmployeeModule,
     LeaveModule,
+    HolidayModule,
   ],
   controllers: [AttendanceAppController],
   providers: [AttendanceService],
+  exports: [AttendanceService],
 })
 export class AttendanceModule { }

@@ -11,6 +11,7 @@ import { GurukulModule } from './gurukul/gurukul.module';
 import { ComplaintModule } from './complaint/complaint.module';
 import { HolidayModule } from './holiday/holiday.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { PayrollModule } from './payroll/payroll.module';
 
 @Module({
   imports: [
@@ -44,6 +45,8 @@ import { AttendanceModule } from './attendance/attendance.module';
     HolidayModule,
 
     AttendanceModule,
+
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AttendanceDocument } from './schemas/attendance.schema';
@@ -9,6 +9,7 @@ import { EmployeeService } from '../employee/employee.service';
 import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import { TrackLocationDto } from './dto/track-location.dto';
 import { LeaveService } from '../leave/leave.service';
+import { CorrectionRequestDto } from './dto/request-correction.dto';
 
 @Injectable()
 export class AttendanceService {
@@ -42,15 +43,6 @@ export class AttendanceService {
                 );
             }
         }
-    }
-
-    private getFormattedDateStringIST(date: Date): string {
-        return new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'Asia/Kolkata',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-        }).format(date);
     }
 
     // ─── CORE API METHODS ───────────────────────────────────────────────
@@ -379,4 +371,157 @@ export class AttendanceService {
             totalHours: avgHours
         };
     }
+
+    // ── ATTENDANCE CALENDAR / HISTORY ──
+    async getMonthlyAttendanceList(employeeId: string, year: string, month: string) {
+        const formattedMonth = month.padStart(2, '0');
+        const monthPrefix = `${year}-${formattedMonth}`;
+        const todayStr = getIST('date');
+        const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
+
+        // 1. Fetch Attendance Records
+        const dbRecords = await this.attendanceModel.find({
+            employeeId: new Types.ObjectId(employeeId),
+            date: { $regex: `^${monthPrefix}` }
+        }).lean();
+
+        const recordMap = new Map();
+        dbRecords.forEach(r => recordMap.set(r.date, r));
+
+        //  2. Fetch Holidays via HolidayService
+        const holidays = await this.holidayService.findHolidaysByMonth(Number(year), Number(month));
+
+        const holidayMap = new Map();
+        holidays.forEach(h => {
+            // Convert native Date to "YYYY-MM-DD" string so it matches our loop
+            const hDate = new Date(h.date);
+            const dateStr = `${hDate.getUTCFullYear()}-${String(hDate.getUTCMonth() + 1).padStart(2, '0')}-${String(hDate.getUTCDate()).padStart(2, '0')}`;
+            holidayMap.set(dateStr, h);
+        });
+
+        const summary = { present: 0, absent: 0, halfDay: 0, weekOffHoliday: 0 };
+        const dailyList: any[] = [];
+
+        // 3. The Gap-Filling Loop
+        for (let i = 1; i <= daysInMonth; i++) {
+            const dateStr = `${year}-${formattedMonth}-${String(i).padStart(2, '0')}`;
+            const jsDate = new Date(Number(year), Number(month) - 1, i);
+            const isSunday = jsDate.getDay() === 0;
+
+            const myRecord = recordMap.get(dateStr);
+            const holidayRecord = holidayMap.get(dateStr);
+            const isFutureDate = dateStr > todayStr;
+
+            const dayData = {
+                date: dateStr,
+                myAttendance: myRecord || null,
+                sharedReports: [],
+                status: 'A',
+                isWeekOff: isSunday,
+                holiday: holidayRecord || null
+            };
+
+            // ── The Priority Logic ──
+            if (myRecord && (myRecord.inTime || (myRecord.status && !['A', 'H'].includes(myRecord.status)))) {
+                dayData.status = myRecord.status || 'P';
+
+                if (dayData.status === 'P') summary.present++;
+                if (dayData.status === 'Half') summary.halfDay++;
+            }
+            else if (holidayRecord) {
+                dayData.status = 'H';
+                summary.weekOffHoliday++;
+            }
+            else if (isSunday) {
+                dayData.status = 'WO';
+                summary.weekOffHoliday++;
+            }
+            else if (isFutureDate) {
+                dayData.status = 'Pending';
+            }
+            else {
+                dayData.status = 'A';
+                summary.absent++;
+            }
+
+            dailyList.push(dayData);
+        }
+
+        return {
+            summary,
+            records: dailyList
+        };
+    }
+
+    // ── ATTENDANCE CORRECTIONS ──
+    async requestCorrection(attendanceId: string, employeeId: string, dto: CorrectionRequestDto) {
+        // 1. Find the specific attendance record
+        const attendance = await this.attendanceModel.findById(attendanceId);
+
+        if (!attendance) {
+            throw new NotFoundException('Attendance record not found');
+        }
+
+        // 2. Security Check: Ensure the user owns this record
+        if (attendance.employeeId.toString() !== employeeId.toString()) {
+            throw new UnauthorizedException('You can only request corrections for your own attendance.');
+        }
+
+        // 3. Prevent duplicate active requests
+        //  UPDATED: Safely checks against the exact 'Pending' enum
+        if (attendance.correctionRequested && attendance.correctionStatus === 'Pending') {
+            throw new ConflictException('A correction request is already pending for this day.');
+        }
+
+        // 4. Save the PROPOSED state into the active request envelope
+        attendance.activeCorrectionRequest = {
+            requestedInTime: dto.requestedInTime ? new Date(dto.requestedInTime) : undefined,
+            requestedOutTime: dto.requestedOutTime ? new Date(dto.requestedOutTime) : undefined,
+            reason: dto.reason,
+            proofUrl: dto.proofUrl || '',
+            requestedOn: getIST() as Date,
+        };
+
+        // 5. Append to the AUDIT TRAIL
+        attendance.correctionHistory.push({
+            action: 'Requested',
+            byRole: 'Employee', // The person making the request
+            byEmployeeId: new Types.ObjectId(employeeId), // Maps to the Employee ref
+            // NOTE: byAdminId is correctly omitted here since it's an employee action
+            remark: 'Correction requested by employee',
+            timestamp: getIST() as Date
+        } as any); // Cast as any if TS complains about Mongoose subdocument arrays
+
+        // 6. Update the main status flags
+        attendance.correctionRequested = true;
+
+        //  UPDATED: Matches the new cleaned enum ['None', 'Pending', 'Approved', 'Rejected']
+        attendance.correctionStatus = 'Pending';
+
+        await attendance.save();
+
+        return {
+            success: true,
+            message: 'Correction request submitted successfully and is pending approval.'
+        };
+    }
+
+    // ── PAYROLL ENGINE HELPER: FETCH RECORDS IN RANGE ──
+    async findRecordsInRange(employeeId: string, fromDate: Date, toDate: Date): Promise<AttendanceDocument[]> {
+        const startDateStr = getIST('date', fromDate);
+        const endDateStr = getIST('date', toDate);
+
+        return await this.attendanceModel
+            .find({
+                employeeId: new Types.ObjectId(employeeId),
+                date: {
+                    $gte: startDateStr,
+                    $lte: endDateStr,
+                },
+            })
+            .sort({ date: 1 }) // Keep days sequential for calculation iterations
+            .lean() // Plain JS objects for high performance processing
+            .exec() as unknown as AttendanceDocument[];
+    }
+
 }

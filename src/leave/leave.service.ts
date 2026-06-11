@@ -255,4 +255,17 @@ export class LeaveService {
         };
     }
 
+    // ── PAYROLL ENGINE HELPER: FETCH APPROVED LEAVES IN RANGE ──
+    async findApprovedLeavesInRange(employeeId: string, fromDate: Date, toDate: Date): Promise<LeaveHistory[]> {
+        return await this.leaveHistoryModel
+            .find({
+                employeeId: new Types.ObjectId(employeeId),
+                overallStatus: 'Approved', // Crucial: Only count fully authorized leaves for payroll calculations
+                startDate: { $lte: toDate },
+                endDate: { $gte: fromDate },
+            })
+            .sort({ startDate: 1 })
+            .lean(); // plain JS objects for clean map/reduce iterations in the payroll engine
+    }
+
 }

@@ -23,6 +23,9 @@ export class LeaveLedger {
     @Prop({ type: Types.ObjectId, ref: 'Attendance' })
     earnedFromAttendanceId?: Types.ObjectId; // Filled only if leaveType is 'CompOff'
 
+    @Prop({ required: true, default: 1 })
+    value!: number; // 1 for a Full Day token, 0.5 for a Half Day token
+
     // ── VOLATILITY ──
     @Prop()
     expiryDate?: Date; // Mandatory for CompOffs (createdAt + 90 days). Null for Paid leaves if they never expire.

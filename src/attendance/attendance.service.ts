@@ -136,7 +136,6 @@ export class AttendanceService {
     }
 
     // ─── CHECK OUT ─────────────────────────────────────────────────────────
-
     async checkOut(jwtPayload: any, dto: CheckOutDto) {
         // 1. Initialize Database Transaction
         const session = await this.attendanceModel.db.startSession();
@@ -187,18 +186,27 @@ export class AttendanceService {
             const isSunday = dayOfWeek === 0;
             const isHoliday = await this.holidayService.checkIsHoliday(dateString);
 
+            // Calculate hurdles for both regular days and comp-offs
+            const halfDayHurdle = shiftMinutes / 2;
+            const tenMinuteGrace = 10;
+
+            //  NEW: Track the value of the token we need to mint
+            let earnedCompOffValue = 0;
+
             if (isSunday || isHoliday) {
-                // STRICT CompOff ENFORCEMENT: ALL OR NOTHING
+                //  CompOff Evaluation (Full vs Half)
                 if (totalMinutes >= shiftMinutes) {
                     attendance.status = 'CompOff';
+                    earnedCompOffValue = 1;
+                } else if ((totalMinutes + tenMinuteGrace) >= halfDayHurdle) {
+                    attendance.status = 'HalfCompOff';
+                    earnedCompOffValue = 0.5;
                 } else {
+                    // Worked less than 4.5 hours on a Sunday. No token earned.
                     attendance.status = 'P';
                 }
             } else {
                 // Normal Working Day Evaluation
-                const halfDayHurdle = shiftMinutes / 2;
-                const tenMinuteGrace = 10;
-
                 if (totalMinutes >= shiftMinutes) {
                     attendance.status = 'P'; // Full Day
                 }
@@ -235,13 +243,15 @@ export class AttendanceService {
                 });
             }
 
-            //  13.5 MINT COMP-OFF TOKEN IF EARNED 
-            if (attendance.status === 'CompOff') {
-                // Pass the session down so if the attendance save fails, the ledger creation rolls back!
+            // 13.5 MINT COMP-OFF TOKEN IF EARNED 
+            if (earnedCompOffValue > 0) {
                 await this.leaveService.createCompOff(
                     jwtPayload.employeeId,
-                    { attendanceId: attendance._id.toString() },
-                    session // Pass the mongoose session (requires a small update to leave.service)
+                    {
+                        attendanceId: attendance._id.toString(),
+                        value: earnedCompOffValue
+                    },
+                    session
                 );
             }
 

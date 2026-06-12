@@ -213,4 +213,27 @@ export class EmployeeService {
 
         return result;
     }
+
+    async addFaceDescriptor(employeeId: string, faceDescriptors: number[][], imageBase64: string): Promise<void> {
+
+        // Note: If you have an AWS S3 or Cloudinary service, you should upload the `imageBase64` 
+        // here and get a standard HTTPS URL back so your MongoDB doesn't get bloated with Base64 strings.
+        // Example: const imageUrl = await this.s3Service.uploadBase64(imageBase64);
+        const imageUrl = imageBase64;
+
+        const updatedEmployee = await this.employeeModel.findByIdAndUpdate(
+            employeeId,
+            {
+                $set: {
+                    faceDescriptors: faceDescriptors, // Save the array of arrays
+                    // profileImageUrl: imageUrl,        // Automatically update their profile pic
+                },
+            },
+            { new: true } // Return the updated document
+        );
+
+        if (!updatedEmployee) {
+            throw new NotFoundException('Employee not found');
+        }
+    }
 }

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
+import { CreateFaceDto } from './dto/add-face-descriptor.dto';
 
 @Controller('api/app/employee')
 export class EmployeeAppController {
@@ -76,6 +77,24 @@ export class EmployeeAppController {
             success: true,
             message: 'Upcoming birthdays fetched successfully',
             data: birthdayData,
+        };
+    }
+
+    @Post('face')
+    @UseGuards(JwtAuthGuard)
+    async registerFaceId(
+        @Request() req: any,
+        @Body() createFaceDto: CreateFaceDto
+    ) {
+        const userId = req.user.employeeId;
+        await this.employeeService.addFaceDescriptor(
+            userId,
+            createFaceDto.faceDescriptors,
+            createFaceDto.image
+        );
+        return {
+            success: true,
+            message: 'Face ID profile secured successfully',
         };
     }
 

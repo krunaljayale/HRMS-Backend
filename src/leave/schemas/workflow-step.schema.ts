@@ -12,7 +12,7 @@ export class WorkflowStep {
     @Prop({ default: false })
     isDirectorProfileStep!: boolean;
 
-    @Prop({ enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' })
+    @Prop({ enum: ['Pending', 'Approved', 'Rejected', 'Cancelled'], default: 'Pending' })
     status!: string;
 
     @Prop({ type: Types.ObjectId, ref: 'Employee' })

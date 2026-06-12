@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { LeaveService } from './leave.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ApplyLeaveDto } from './dto/apply-leave.dto';
@@ -43,6 +43,22 @@ export class LeaveAppController {
             data: data,
             message: 'Leave request submitted successfully'
         }
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Patch('cancel/:leaveId')
+    async cancelLeaveRequest(
+        @Req() req: any,
+        @Param('leaveId') leaveId: string
+    ) {
+        const employeeId = req.user.employeeId;
+        const result = await this.leaveService.cancelLeaveRequest(employeeId, leaveId);
+
+        return {
+            statusCode: 200,
+            data: result,
+            message: 'Leave request cancelled successfully.'
+        };
     }
 
 

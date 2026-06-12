@@ -66,8 +66,8 @@ export class Employee extends Document {
     @Prop()
     profileImageUrl?: string;
 
-    @Prop({ type: [Number] })
-    faceDescriptor?: number[];
+    @Prop({ type: [[Number]], default: [] })
+    faceDescriptors?: number[][];
 
     // ── PERSONAL DETAILS ──
     @Prop({ trim: true })

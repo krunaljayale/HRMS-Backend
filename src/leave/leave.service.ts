@@ -52,25 +52,45 @@ export class LeaveService {
             ? dto.consumedLedgerIds.map((id: string) => new Types.ObjectId(id))
             : [];
 
-        //  VERIFY & LOCK THE TOKENS IMMEDIATELY 
+        //  VERIFY TOKEN VALUES & LOCK THE TOKENS
         if (ledgerObjectIds.length > 0) {
+
+            // 1. Fetch the actual tokens so we can read their fractional values
+            const tokensToConsume = await this.leaveLedgerModel.find({
+                _id: { $in: ledgerObjectIds },
+                status: 'Active',
+                employeeId: new Types.ObjectId(applicantId)
+            });
+
+            // 2. Ensure the user isn't trying to spend tokens that don't belong to them or are already used
+            if (tokensToConsume.length !== ledgerObjectIds.length) {
+                throw new BadRequestException('One or more selected tokens are no longer available or already in use.');
+            }
+
+            // 3. Calculate the mathematical sum of the selected tokens
+            const totalTokenValue = tokensToConsume.reduce((sum, token) => sum + (token.value || 1), 0);
+
+            // 4. Validate that the token sum covers the requested days
+            if (totalTokenValue < dto.totalDays) {
+                throw new BadRequestException(`Insufficient token value. You requested ${dto.totalDays} day(s), but only provided ${totalTokenValue} day(s) worth of tokens.`);
+            }
+
+            // 5. Securely Lock the tokens
             const lockResult = await this.leaveLedgerModel.updateMany(
                 {
                     _id: { $in: ledgerObjectIds },
-                    status: 'Active', // Ensure they are actually active and not already used
-                    employeeId: new Types.ObjectId(applicantId) // Security check
+                    status: 'Active'
                 },
                 { $set: { status: 'Locked' } }
             );
 
-            // If the user tried to submit 2 tokens, but only 1 was locked, abort.
+            // 6. Concurrency check: If someone clicked submit twice in 1ms, rollback
             if (lockResult.modifiedCount !== ledgerObjectIds.length) {
-                // Revert any partial locks to prevent orphaned tokens
                 await this.leaveLedgerModel.updateMany(
                     { _id: { $in: ledgerObjectIds }, status: 'Locked' },
                     { $set: { status: 'Active' } }
                 );
-                throw new BadRequestException('One or more selected tokens are no longer available or already in use.');
+                throw new BadRequestException('Concurrency error: Tokens were modified by another process. Please try again.');
             }
         }
 
@@ -86,10 +106,48 @@ export class LeaveService {
             workflowSteps: generatedRoute,
             currentStepIndex: 0,
             overallStatus: 'Pending',
-            consumedLedgerIds: ledgerObjectIds // Save the vault mappings
+            consumedLedgerIds: ledgerObjectIds 
         });
 
         return newLeave;
+    }
+
+    async cancelLeaveRequest(employeeId: string, leaveId: string) {
+        // 1. Find the specific leave request
+        const leaveRequest = await this.leaveHistoryModel.findOne({
+            _id: new Types.ObjectId(leaveId),
+            employeeId: new Types.ObjectId(employeeId)
+        });
+
+        if (!leaveRequest) {
+            throw new NotFoundException('Leave request not found.');
+        }
+
+        // 2. Ensure it is actually pending. You cannot cancel an already approved or rejected leave.
+        if (leaveRequest.overallStatus !== 'Pending') {
+            throw new BadRequestException(`You cannot cancel a leave that is already ${leaveRequest.overallStatus.toLowerCase()}.`);
+        }
+
+        // 3. Mark the leave as Cancelled
+        leaveRequest.overallStatus = 'Cancelled';
+        
+        // Optional: Update workflow steps to reflect cancellation
+        if (leaveRequest.workflowSteps && leaveRequest.workflowSteps.length > 0) {
+            leaveRequest.workflowSteps[leaveRequest.currentStepIndex].status = 'Cancelled';
+        }
+
+        // 4. UNLOCK THE TOKENS
+        if (leaveRequest.consumedLedgerIds && leaveRequest.consumedLedgerIds.length > 0) {
+            await this.leaveLedgerModel.updateMany(
+                { _id: { $in: leaveRequest.consumedLedgerIds }, status: 'Locked' },
+                { $set: { status: 'Active' } }
+            );
+        }
+
+        // 5. Save the updated leave record
+        await leaveRequest.save();
+
+        return leaveRequest;
     }
 
     //  THE APPROVAL ENGINE (With Token Burning) ──
@@ -187,7 +245,8 @@ export class LeaveService {
     }
 
     // LEDGER CREATION & RETRIEVAL ──
-    async createCompOff(employeeId: string, dto: CreateCompOffLedgerDto, session?: any) {
+    // Notice we added 'value' to the DTO payload
+    async createCompOff(employeeId: string, dto: { attendanceId: string; value: number }, session?: any) {
         const employeeExists = await this.employeeService.getEmployeeById(employeeId, '_id');
         if (!employeeExists) {
             throw new NotFoundException('Cannot issue Comp-Off token: Employee not found');
@@ -201,6 +260,7 @@ export class LeaveService {
                 employeeId: new Types.ObjectId(employeeId),
                 leaveType: 'CompOff',
                 status: 'Active',
+                value: dto.value, //  Saves 1 or 0.5
                 earnedFromAttendanceId: new Types.ObjectId(dto.attendanceId),
                 expiryDate: expiryDate
             }

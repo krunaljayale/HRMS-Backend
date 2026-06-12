@@ -100,7 +100,7 @@ export class Attendance extends Document { // Extends Document for _id typings
 
     // ── STATUS ──
     @Prop({
-        enum: ['P', 'A', 'WO', 'L', 'CompOff', 'AUTO', 'H', 'Half'],
+        enum: ['P', 'A', 'WO', 'L', 'HalfCompOff', 'CompOff', 'AUTO', 'H', 'Half'],
         default: 'P',
     })
     status!: string;

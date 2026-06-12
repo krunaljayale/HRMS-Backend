@@ -12,6 +12,7 @@ import { ComplaintModule } from './complaint/complaint.module';
 import { HolidayModule } from './holiday/holiday.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { SystemConfigModule } from './system-config/system-config.module';
 
 @Module({
   imports: [
@@ -47,6 +48,8 @@ import { PayrollModule } from './payroll/payroll.module';
     AttendanceModule,
 
     PayrollModule,
+
+    SystemConfigModule,
   ],
   controllers: [AppController],
   providers: [AppService],

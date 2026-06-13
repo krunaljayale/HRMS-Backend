@@ -13,6 +13,7 @@ import { HolidayModule } from './holiday/holiday.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { SystemConfigModule } from './system-config/system-config.module';
+import { ResignationModule } from './resignation/resignation.module';
 
 @Module({
   imports: [
@@ -50,6 +51,8 @@ import { SystemConfigModule } from './system-config/system-config.module';
     PayrollModule,
 
     SystemConfigModule,
+
+    ResignationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

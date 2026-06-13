@@ -1,7 +1,7 @@
 import { IsString, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
 
 export class UpdateComplaintStatusDto {
-  @IsEnum(['Pending', 'Acknowledged', 'In Review', 'Resolved', 'Rejected'])
+  @IsEnum(['Pending', 'Acknowledged', 'In Review', 'Resolved', 'Rejected', 'Withdrawn'])
   status!: string;
 
   @IsString()

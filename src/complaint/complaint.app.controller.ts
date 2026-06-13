@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards, Req, Delete } from '@nestjs/common';
 import { ComplaintService } from './complaint.service';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
 import { UpdateComplaintStatusDto } from './dto/update-complaint-status.dto';
@@ -9,9 +9,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class ComplaintAppController {
   constructor(private readonly complaintService: ComplaintService) { }
 
+  @UseGuards(JwtAuthGuard)
   @Post()
   async create(@Body() createComplaintDto: CreateComplaintDto, @Req() req: any) {
-    // SECURITY UPGRADE: Force the employee ID from the token instead of trusting the DTO
     createComplaintDto.employee = req.user.employeeId;
 
     const data = await this.complaintService.create(createComplaintDto);
@@ -22,8 +22,8 @@ export class ComplaintAppController {
     };
   }
 
-  // 🚀 NEW ENDPOINT: /api/app/complaints/my
   // MUST BE PLACED BEFORE @Get(':id')
+
   @Get('my')
   async findMyComplaints(@Req() req: any, @Query() query: any) {
     // 1. Extract the secure ID from the decoded JWT token
@@ -68,6 +68,23 @@ export class ComplaintAppController {
     return {
       success: true,
       message: 'Complaint status updated successfully',
+      data,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('withdraw/:id')
+  async withdrawComplaint(
+    @Req() req: any,
+    @Param('id') id: string
+  ) {
+    const employeeId = req.user.employeeId;
+
+    const data = await this.complaintService.withdrawComplaint(employeeId, id);
+
+    return {
+      success: true,
+      message: 'Complaint withdrawn successfully',
       data,
     };
   }

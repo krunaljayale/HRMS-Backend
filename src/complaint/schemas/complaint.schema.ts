@@ -3,7 +3,7 @@ import { Document, Types } from 'mongoose';
 
 @Schema({ _id: false }) // Sub-documents don't need their own ID
 export class ComplaintTimeline {
-    @Prop({ required: true, enum: ['Submitted', 'Acknowledged', 'In Review', 'Resolved', 'Rejected', 'Commented'] })
+    @Prop({ required: true, enum: ['Submitted', 'Acknowledged', 'In Review', 'Resolved', 'Rejected', 'Commented', 'Withdrawn'] })
     action!: string;
 
     @Prop({ type: Types.ObjectId, ref: 'Employee', required: true })
@@ -47,7 +47,7 @@ export class Complaint extends Document {
     @Prop({ required: true, trim: true, maxlength: 2000 })
     description!: string;
 
-    @Prop({ enum: ['Pending', 'Acknowledged', 'In Review', 'Resolved', 'Rejected'], default: 'Pending' })
+    @Prop({ enum: ['Pending', 'Acknowledged', 'In Review', 'Resolved', 'Rejected', 'Withdrawn'], default: 'Pending' })
     status!: string;
 
     @Prop({ default: '' })

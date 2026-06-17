@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Query, Req, Request, UseGuards } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
 import { CreateFaceDto } from './dto/add-face-descriptor.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('api/app/employee')
 export class EmployeeAppController {
@@ -29,6 +30,18 @@ export class EmployeeAppController {
         };
     }
 
+    @UseGuards(JwtAuthGuard)
+    @Post('change-password')
+    @HttpCode(HttpStatus.OK)
+    async changePassword(
+        @Req() req: any,
+        @Body() changePasswordDto: ChangePasswordDto
+    ) {
+        const employeeID = req.user.employeeId;
+
+        return this.employeeService.updatePassword(employeeID, changePasswordDto);
+    }
+
     @Patch('profile/fcm-token')
     @UseGuards(JwtAuthGuard)
     async updateFcmToken(
@@ -47,7 +60,6 @@ export class EmployeeAppController {
             message: 'FCM token updated successfully',
         };
     }
-
 
     // ── GET DIRECTORY ROUTE ──
     @Get('directory')

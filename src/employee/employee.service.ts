@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Employee, EmployeeDocument } from './schemas/employee.schema';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class EmployeeService {
@@ -34,6 +35,41 @@ export class EmployeeService {
         const { password, ...safeEmployee } = employee.toObject();
 
         return safeEmployee;
+    }
+
+    async updatePassword(employeeID: string, changePasswordDto: ChangePasswordDto) {
+        const { oldPassword, newPassword } = changePasswordDto;
+
+        // 1. Find the user by ID and explicitly request the hidden password field
+        const employee = await this.employeeModel
+            .findById(employeeID)
+            .select('+password')
+            .exec();
+
+        if (!employee) {
+            throw new BadRequestException('User not found.');
+        }
+
+        // 2. Verify the old password is correct
+        const isPasswordValid = await bcrypt.compare(oldPassword, employee.password);
+
+        if (!isPasswordValid) {
+            throw new BadRequestException('Incorrect old password.');
+        }
+
+        // 3. Hash the new password
+        const saltRounds = 12;
+        const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+        // 4. Update and save the document directly
+        employee.password = hashedNewPassword;
+        await employee.save();
+
+        // 5. Return success response
+        return {
+            success: true,
+            message: 'Password updated successfully'
+        };
     }
 
     // ── GET EMPLOYEE BY ID (Optimized with Select) ──

@@ -49,6 +49,11 @@ export class AuthController {
     // ── 2. HR LOGIN (e.g., IAHR00001) ──
     @Post('hr/login')
     async hrLogin(@Body() loginDto: any) {
+        if (!loginDto.employeeCode || !loginDto.password) {
+            throw new UnauthorizedException('Employee Code and Password are required');
+        }
+
+        console.log(loginDto);
         // const user = await this.hrService.validatePassword(loginDto.id, loginDto.password);
 
         const userId = 'mongo_id_456';

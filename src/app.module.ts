@@ -14,6 +14,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { SystemConfigModule } from './system-config/system-config.module';
 import { ResignationModule } from './resignation/resignation.module';
+import { HrModule } from './hr/hr.module';
 
 @Module({
   imports: [
@@ -53,6 +54,8 @@ import { ResignationModule } from './resignation/resignation.module';
     SystemConfigModule,
 
     ResignationModule,
+
+    HrModule,
   ],
   controllers: [AppController],
   providers: [AppService],

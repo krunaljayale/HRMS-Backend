@@ -57,12 +57,10 @@ export class EmployeeService {
             throw new BadRequestException('Incorrect old password.');
         }
 
-        // 3. Hash the new password
-        const saltRounds = 12;
-        const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+        // 3. Assign the RAW new password (The pre-save hook handles the hashing)
+        employee.password = newPassword;
 
-        // 4. Update and save the document directly
-        employee.password = hashedNewPassword;
+        // 4. Save the document
         await employee.save();
 
         // 5. Return success response

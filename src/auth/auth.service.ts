@@ -10,7 +10,7 @@ export class AuthService {
         const payload = { sub: employeeId, role: role };
 
         const accessToken = this.jwtService.sign(payload, {
-            expiresIn: '15m', // Dies quickly for security
+            expiresIn: '1m', // Dies quickly for security
             secret: process.env.JWT_ACCESS_SECRET || 'super_secret_development_key'
         });
 

@@ -6,7 +6,7 @@ export type EmployeeDocument = Employee & Document;
 
 // ── ENUMS FOR STRICT DATA TYPING ──
 export const DEPARTMENTS = [
-    'Engineering', 'Sales', 'Marketing', 'Finance', 'Operations', 'HR', 'IT', 'Accountant', 'Area Manager', 'Driver', 'Helper', 'Office Boy', 'Wealth Advisor', 'BDM' // Business Development Manager
+    'Director', 'Engineering', 'Sales', 'Marketing', 'Finance', 'Operations', 'HR', 'IT', 'Accountant', 'Area Manager', 'Driver', 'Helper', 'Office Boy', 'Wealth Advisor', 'BDM' // Business Development Manager
 ];
 
 export const POSITIONS = [

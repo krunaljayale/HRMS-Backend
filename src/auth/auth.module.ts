@@ -6,12 +6,14 @@ import { JwtStrategy } from './jwt.strategy';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { EmployeeModule } from '../employee/employee.module';
+import { HrModule } from '../hr/hr.module';
 
 @Module({
     imports: [
         PassportModule,
         JwtModule.register({}), // Secrets are handled in the service directly now,
-        EmployeeModule, // Import EmployeeModule to use EmployeeService in AuthController
+        EmployeeModule,
+        HrModule,
     ],
     controllers: [AuthController],
     providers: [JwtStrategy, AuthService],

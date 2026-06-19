@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { EmployeeService } from '../employee/employee.service';
-// import { HrService } from '../hr/hr.service';
+import { HrService } from '../hr/hr.service';
 // import { DirectorService } from '../director/director.service';
 
 @Controller('api/auth')
@@ -9,7 +9,7 @@ export class AuthController {
     constructor(
         private readonly authService: AuthService,
         private readonly employeeService: EmployeeService,
-        // private readonly hrService: HrService,
+        private readonly hrService: HrService,
     ) { }
 
     // ── 1. EMPLOYEE LOGIN (e.g., IA00001) ──
@@ -49,17 +49,17 @@ export class AuthController {
     // ── 2. HR LOGIN (e.g., IAHR00001) ──
     @Post('hr/login')
     async hrLogin(@Body() loginDto: any) {
-        if (!loginDto.employeeCode || !loginDto.password) {
-            throw new UnauthorizedException('Employee Code and Password are required');
+
+        if (!loginDto.idCode || !loginDto.password) {
+            throw new UnauthorizedException('ID Code and Password are required');
+        }
+        const hr = await this.hrService.validatePassword(loginDto.idCode, loginDto.password);
+
+        if (!hr) {
+            throw new UnauthorizedException('Invalid credentials.');
         }
 
-        console.log(loginDto);
-        // const user = await this.hrService.validatePassword(loginDto.id, loginDto.password);
-
-        const userId = 'mongo_id_456';
-        const role = 'HR';
-
-        const tokens = await this.authService.generateAuthTokens(userId, role);
+        const tokens = await this.authService.generateAuthTokens(hr._id.toString(), 'HR');
         return { success: true, message: 'HR login successful', data: tokens };
     }
 

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { LeaveHistory, LeaveHistoryDocument } from './schemas/leave-history.schema';
@@ -6,7 +6,7 @@ import { EmployeeService } from '../employee/employee.service';
 import { IWorkflowStep } from './interfaces/workflow-step.interface';
 import { LeaveLedger, LeaveLedgerDocument } from './schemas/leave-ledger.schema';
 import { CreateCompOffLedgerDto } from './dto/create-comp-off-ledger.dto';
-import { getIST } from '../utils/time.utils';
+import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import e from 'express';
 
 @Injectable()
@@ -106,7 +106,7 @@ export class LeaveService {
             workflowSteps: generatedRoute,
             currentStepIndex: 0,
             overallStatus: 'Pending',
-            consumedLedgerIds: ledgerObjectIds 
+            consumedLedgerIds: ledgerObjectIds
         });
 
         return newLeave;
@@ -130,7 +130,7 @@ export class LeaveService {
 
         // 3. Mark the leave as Cancelled
         leaveRequest.overallStatus = 'Cancelled';
-        
+
         // Optional: Update workflow steps to reflect cancellation
         if (leaveRequest.workflowSteps && leaveRequest.workflowSteps.length > 0) {
             leaveRequest.workflowSteps[leaveRequest.currentStepIndex].status = 'Cancelled';
@@ -326,6 +326,26 @@ export class LeaveService {
             })
             .sort({ startDate: 1 })
             .lean(); // plain JS objects for clean map/reduce iterations in the payroll engine
+    }
+
+    async getTodayApprovedLeavesCount(): Promise<number> {
+        try {
+            // 1. Establish precise IST bounding marks for today (00:00:00 to 23:59:59)
+            const startOfToday = createTodayISTThreshold('00:00:00');
+            const endOfToday = createTodayISTThreshold('23:59:59');
+
+            // 2. Query documents overlapping with today's timeframe
+            return await this.leaveHistoryModel.countDocuments({
+                overallStatus: 'Approved',
+                // Check overlap condition: Leave starts on or before the end of today, 
+                // AND leave ends on or after the start of today.
+                startDate: { $lte: endOfToday },
+                endDate: { $gte: startOfToday },
+            });
+        } catch (error) {
+            console.error('Database getTodayApprovedLeavesCount failure:', error);
+            throw new InternalServerErrorException('Failed to calculate employees currently on leave');
+        }
     }
 
 }

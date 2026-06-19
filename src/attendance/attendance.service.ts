@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AttendanceDocument } from './schemas/attendance.schema';
@@ -534,4 +534,92 @@ export class AttendanceService {
             .exec() as unknown as AttendanceDocument[];
     }
 
+    async getTodayPresentCount(): Promise<number> {
+        try {
+            const todayStr = getIST('date'); // "YYYY-MM-DD"
+
+            // Simply count how many records exist for today with a 'P' status
+            return await this.attendanceModel.countDocuments({
+                date: todayStr,
+                status: 'P',
+            });
+        } catch (error) {
+            console.error('Database getTodayPresentCount failure:', error);
+            throw new InternalServerErrorException("Failed to calculate today's present count");
+        }
+    }
+
+    /**
+   * Calculates the average attendance rates grouped by Month or Year
+   * @param viewMode - 'monthly' or 'yearly'
+   */
+    async getAggregateAttendanceStats(viewMode: 'monthly' | 'yearly') {
+        try {
+            const currentFullIST = getIST('full'); // "2026-06-19 14:46:14"
+            const currentYear = currentFullIST.split('-')[0]; // "2026"
+
+            // 1. Change type from 'string' to 'any' so it can accept both strings and aggregation objects
+            let matchQuery: any = {};
+            let groupFormat: any = '';
+
+            if (viewMode === 'monthly') {
+                // Filter records only for the current calendar year to keep data relevant
+                matchQuery = { date: new RegExp(`^${currentYear}-`) };
+
+                // This is an object expression expression, which requires type 'any'
+                groupFormat = { $substr: ['$date', 5, 2] };
+            } else {
+                // Extracting the year part
+                groupFormat = { $substr: ['$date', 0, 4] };
+            }
+
+            // 2. Pass it directly into the pipeline
+            const rawAggregatedData = await this.attendanceModel.aggregate([
+                { $match: matchQuery },
+                {
+                    $group: {
+                        _id: groupFormat, // Works perfectly now!
+                        presentDays: {
+                            $sum: { $cond: [{ $eq: ['$status', 'P'] }, 1, 0] },
+                        },
+                        absentDays: {
+                            $sum: { $cond: [{ $eq: ['$status', 'A'] }, 1, 0] },
+                        },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]);
+
+            // 3. Normalize and map to match your exact frontend structural types
+            const monthsArray = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            const processedStats = rawAggregatedData.map((bucket) => {
+                const present = bucket.presentDays || 0;
+                const absent = bucket.absentDays || 0;
+                const totalExpectedDays = present + absent;
+
+                // Calculate rate. If no records exist, fallback to 0%
+                const attendanceRate = totalExpectedDays > 0
+                    ? Math.round((present / totalExpectedDays) * 100)
+                    : 0;
+
+                // Establish uniform labels ('Jan', 'Feb' etc for months; '2024', '2025' for years)
+                let displayLabel = bucket._id;
+                if (viewMode === 'monthly') {
+                    const monthIndex = parseInt(bucket._id, 10) - 1;
+                    displayLabel = monthsArray[monthIndex] || bucket._id;
+                }
+
+                return {
+                    label: displayLabel,
+                    value: attendanceRate,
+                };
+            });
+
+            return processedStats;
+        } catch (error) {
+            console.error(`Database getAggregateAttendanceStats error [${viewMode}]:`, error);
+            throw new InternalServerErrorException('Failed to calculate attendance analytics metrics');
+        }
+    }
 }

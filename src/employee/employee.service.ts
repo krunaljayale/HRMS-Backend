@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Employee, EmployeeDocument } from './schemas/employee.schema';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
@@ -268,6 +268,92 @@ export class EmployeeService {
 
         if (!updatedEmployee) {
             throw new NotFoundException('Employee not found');
+        }
+    }
+
+    async countAllEmployees(): Promise<number> {
+        return await this.employeeModel.countDocuments({ status: 'Active' });
+    }
+
+    async getDepartmentWiseCount(): Promise<{ label: string; value: number }[]> {
+        try {
+            const result = await this.employeeModel.aggregate([
+                // 1. Only count employees who are currently Active
+                { $match: { status: 'Active' } },
+
+                // 2. Group them by their 'department' field
+                {
+                    $group: {
+                        _id: '$department',
+                        value: { $sum: 1 },
+                    },
+                },
+
+                // 3. Format the output to match the React frontend interface
+                {
+                    $project: {
+                        // If the department field is null/missing, label it 'Unassigned'
+                        label: { $ifNull: ['$_id', 'Unassigned'] },
+                        value: 1,
+                        _id: 0,
+                    },
+                },
+
+                // 4. Sort so the largest departments show up first
+                { $sort: { value: -1 } },
+            ]);
+
+            return result;
+        } catch (error) {
+            console.error('Database getDepartmentWiseCount failure:', error);
+            throw new InternalServerErrorException('Failed to calculate department statistics');
+        }
+    }
+
+    async getRecentHires() {
+        try {
+            // 1. Use aggregation to unify the dates before sorting
+            const recentDocs = await this.employeeModel.aggregate([
+                // Filter for active employees
+                { $match: { status: 'Active' } },
+
+                // Create a temporary 'targetDate' field. 
+                // If joiningDate exists, use it. Otherwise, use createdAt.
+                {
+                    $addFields: {
+                        targetDate: { $ifNull: ['$joiningDate', '$createdAt'] }
+                    }
+                },
+
+                // Sort strictly by our newly computed targetDate, descending (newest first)
+                { $sort: { targetDate: -1 } },
+
+                // Grab only the top 5
+                { $limit: 5 }
+            ]);
+
+            // 2. Map the plain objects returned by the aggregation
+            return recentDocs.map((emp) => {
+                // Aggregation returns plain JavaScript objects, so we ensure the date is safely parsed
+                const finalDate = new Date(emp.targetDate);
+
+                const formattedDate = new Intl.DateTimeFormat('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                }).format(finalDate);
+
+                return {
+                    id: emp._id.toString(),
+                    name: emp.name || 'New Employee',
+                    role: emp.position || 'Unassigned',
+                    joinDate: formattedDate,
+                    avatar: emp.profileImageUrl || '',
+                };
+            });
+        } catch (error) {
+            console.error('Database getRecentHires failure:', error);
+            throw new InternalServerErrorException('Failed to retrieve recent hires');
         }
     }
 }

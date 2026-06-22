@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Payroll, PayrollDocument } from './schemas/payroll.schema';
@@ -55,13 +55,19 @@ export class PayrollService {
         let current = new Date(effectiveStartDate);
 
         while (current <= toDate) {
-            const istDateString = current.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
-            const isSunday = new Date(istDateString).getDay() === 0;
+            // FIX: Generate the YYYY-MM-DD string strictly in IST
+            const dStr = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(current);
 
-            const yyyy = current.getFullYear();
-            const mm = String(current.getMonth() + 1).padStart(2, '0');
-            const dd = String(current.getDate()).padStart(2, '0');
-            const dStr = `${yyyy}-${mm}-${dd}`;
+            // FIX: Check if the day is Sunday strictly in IST
+            const isSunday = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Kolkata',
+                weekday: 'short'
+            }).format(current) === 'Sun';
 
             const isHolid = holidays.some(h => {
                 const hDate = h.date instanceof Date ? h.date : new Date(h.date);

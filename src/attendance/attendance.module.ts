@@ -7,6 +7,7 @@ import { AttendanceSchema } from './schemas/attendance.schema';
 import { AttendanceAppController } from './attendance.app.controller';
 import { EmployeeModule } from '../employee/employee.module';
 import { LeaveModule } from '../leave/leave.module';
+import { SystemConfigModule } from '../system-config/system-config.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { LeaveModule } from '../leave/leave.module';
     EmployeeModule,
     LeaveModule,
     HolidayModule,
+    SystemConfigModule,
   ],
   controllers: [AttendanceAppController],
   providers: [AttendanceService],

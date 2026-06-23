@@ -3,8 +3,18 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
 
 async function bootstrap() {
+
+  if (!getApps().length) {
+    const serviceAccount = require('../src/notification/fcm-config/firebase-adminsdk.json');
+
+    initializeApp({
+      credential: cert(serviceAccount),
+    });
+    console.log('🔥 Firebase Admin successfully initialized');
+  }
   const app = await NestFactory.create(AppModule);
 
   // 1. Global Validation

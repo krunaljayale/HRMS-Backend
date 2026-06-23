@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { AttendanceDocument } from './schemas/attendance.schema';
 import { HolidayService } from '../holiday/holiday.service';
 import { getDistanceInMeters } from './utils/geo.util';
@@ -10,6 +10,7 @@ import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import { TrackLocationDto } from './dto/track-location.dto';
 import { LeaveService } from '../leave/leave.service';
 import { CorrectionRequestDto } from './dto/request-correction.dto';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 @Injectable()
 export class AttendanceService {
@@ -23,6 +24,7 @@ export class AttendanceService {
         private holidayService: HolidayService,
         private employeeService: EmployeeService,
         private leaveService: LeaveService,
+        private readonly systemConfigService: SystemConfigService,
     ) { }
 
     private validateLocation(
@@ -534,6 +536,9 @@ export class AttendanceService {
             .exec() as unknown as AttendanceDocument[];
     }
 
+
+    // ─────────────────────────────────────── HR SEVICES START ──────────────────────────────────────────
+
     async getTodayPresentCount(): Promise<number> {
         try {
             const todayStr = getIST('date'); // "YYYY-MM-DD"
@@ -622,4 +627,374 @@ export class AttendanceService {
             throw new InternalServerErrorException('Failed to calculate attendance analytics metrics');
         }
     }
+
+    async getLiveRoster(filters: { department?: string; workMode?: string; search?: string }) {
+        try {
+            const todayStr = getIST('date'); // Returns "YYYY-MM-DD"
+
+            // 1. Build the Initial Match (Pre-Lookup optimization)
+            const initialMatch: any = { date: todayStr };
+
+            // Apply Work Mode filter if provided
+            if (filters.workMode) {
+                initialMatch.workMode = filters.workMode;
+            }
+
+            // Apply Search filter (Regex on Name or Code) if provided
+            if (filters.search) {
+                const searchRegex = new RegExp(filters.search, 'i');
+                initialMatch.$or = [
+                    { employeeName: searchRegex },
+                    { employeeCode: searchRegex }
+                ];
+            }
+
+            // 2. Build the Aggregation Pipeline
+            const pipeline: PipelineStage[] = [
+                // Stage 1: Filter Attendance documents for today
+                { $match: initialMatch },
+
+                // Stage 2: Join with the Employee collection to get Dept, Role, and Avatar
+                {
+                    $lookup: {
+                        from: 'employees', // Must exactly match your MongoDB collection name!
+                        localField: 'employeeId',
+                        foreignField: '_id',
+                        as: 'employeeData'
+                    }
+                },
+
+                // Stage 3: Unwind the array created by $lookup
+                {
+                    $unwind: {
+                        path: '$employeeData',
+                        preserveNullAndEmptyArrays: true // Keep attendance even if employee doc is missing
+                    }
+                }
+            ];
+
+            // Stage 4: Post-Lookup Match (If filtering by Department)
+            if (filters.department) {
+                pipeline.push({
+                    $match: {
+                        'employeeData.department': filters.department
+                    }
+                });
+            }
+
+            // Stage 5: Project exactly what the React Frontend expects
+            pipeline.push({
+                $project: {
+                    _id: 0,
+                    attendanceId: '$_id',
+                    employeeId: 1,
+                    employeeCode: 1,
+                    employeeName: 1,
+                    inTime: 1,
+                    outTime: 1,
+                    status: 1,
+                    workMode: 1,
+                    isLate: 1,
+                    lateMinutes: 1,
+                    // Pulling from joined Employee Data
+                    department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                    designation: { $ifNull: ['$employeeData.position', 'Employee'] },
+                    avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] }
+                }
+            });
+
+            // Stage 6: Sort logically (e.g., newest punches first)
+            pipeline.push({ $sort: { inTime: -1 } });
+
+            // 3. Execute Pipeline
+            const roster = await this.attendanceModel.aggregate(pipeline).exec();
+
+            return roster;
+
+        } catch (error) {
+            console.error('Database getLiveRoster failure:', error);
+            throw new InternalServerErrorException('Failed to fetch the live attendance roster');
+        }
+    }
+
+    async getPendingCorrectionsCount(): Promise<number> {
+        try {
+            // Count documents where correctionStatus is exactly 'Pending'
+            const count = await this.attendanceModel.countDocuments({
+                correctionStatus: 'Pending'
+            }).exec();
+
+            return count;
+        } catch (error) {
+            console.error('Database getPendingCorrectionsCount failure:', error);
+            throw new InternalServerErrorException('Failed to count pending corrections');
+        }
+    }
+
+    async getCorrections(status: string = 'Pending') {
+        try {
+            // If status is 'Resolved', fetch BOTH Approved and Rejected requests
+            const matchCondition = status === 'Resolved'
+                ? { correctionStatus: { $in: ['Approved', 'Rejected'] } }
+                : { correctionStatus: 'Pending' };
+
+            const pipeline: PipelineStage[] = [
+                { $match: matchCondition },
+
+                // Join Employee Data
+                {
+                    $lookup: {
+                        from: 'employees',
+                        localField: 'employeeId',
+                        foreignField: '_id',
+                        as: 'employeeData'
+                    }
+                },
+                {
+                    $unwind: {
+                        path: '$employeeData',
+                        preserveNullAndEmptyArrays: true
+                    }
+                },
+
+                // Project exactly what the UI needs
+                {
+                    $project: {
+                        _id: 0,
+                        attendanceId: '$_id',
+                        date: 1,
+
+                        // 🟢 NEW: Pass the actual resolution status to the frontend
+                        resolutionStatus: '$correctionStatus',
+
+                        // Employee Info
+                        employeeName: 1,
+                        employeeCode: 1,
+                        department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                        avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] },
+
+                        // Original Times
+                        originalInTime: '$inTime',
+                        originalOutTime: '$outTime',
+                        originalStatus: '$status',
+
+                        // Requested Times
+                        requestedInTime: '$activeCorrectionRequest.requestedInTime',
+                        requestedOutTime: '$activeCorrectionRequest.requestedOutTime',
+                        requestedStatus: '$activeCorrectionRequest.requestedStatus',
+                        reason: '$activeCorrectionRequest.reason',
+                        proofUrl: '$activeCorrectionRequest.proofUrl',
+                        requestedOn: '$activeCorrectionRequest.requestedOn',
+                    }
+                },
+                // Sort by requested date (Newest first is usually better for history)
+                { $sort: { requestedOn: -1 } }
+            ];
+
+            return await this.attendanceModel.aggregate(pipeline).exec();
+        } catch (error) {
+            console.error('Database getCorrections failure:', error);
+            throw new InternalServerErrorException('Failed to fetch corrections');
+        }
+    }
+
+    async approveCorrection(attendanceId: string, adminId: string, remark: string = 'Approved by HR') {
+
+        const record = await this.attendanceModel.findById(attendanceId);
+
+        if (!record) throw new NotFoundException('Attendance record not found');
+
+        if (record.correctionStatus !== 'Pending' || !record.activeCorrectionRequest) {
+            throw new BadRequestException('No pending correction request found for this record');
+        }
+
+        const request = record.activeCorrectionRequest!;
+
+        // Now you can safely use it without errors!
+        if (request.requestedInTime) record.inTime = request.requestedInTime;
+        if (request.requestedOutTime) record.outTime = request.requestedOutTime;
+        if (request.requestedStatus) record.status = request.requestedStatus;
+
+        if (record.inTime && record.outTime) {
+            const diffMs = record.outTime.getTime() - record.inTime.getTime();
+            const totalMinutes = Math.floor(diffMs / 60000);
+
+            record.totalMinutes = totalMinutes;
+            record.totalHours = parseFloat((totalMinutes / 60).toFixed(2));
+
+            const rules = await this.systemConfigService.getShiftRulesForDate(record.date);
+
+            const isHoliday = false; // Add holiday logic if needed
+
+            if (rules.isSunday || isHoliday) {
+                if (totalMinutes >= rules.shiftMinutes) {
+                    record.status = 'CompOff';
+                } else if ((totalMinutes + rules.tenMinuteGrace) >= rules.halfDayHurdle) {
+                    record.status = 'HalfCompOff';
+                } else {
+                    record.status = 'P';
+                }
+            } else {
+                if (totalMinutes >= rules.shiftMinutes) {
+                    record.status = 'P';
+                } else if ((totalMinutes + rules.tenMinuteGrace) >= rules.halfDayHurdle) {
+                    record.status = 'Half';
+                } else {
+                    record.status = 'A';
+                }
+            }
+        }
+
+        record.correctionStatus = 'Approved';
+        record.correctionHistory.push({
+            action: 'Approved',
+            byRole: 'HR',
+            byAdminId: new Types.ObjectId(adminId),
+            remark: remark,
+            timestamp: new Date()
+        });
+
+        await record.save();
+        return record;
+    }
+
+    async rejectCorrection(attendanceId: string, adminId: string, remark: string = 'Rejected by HR') {
+        const record = await this.attendanceModel.findById(attendanceId);
+
+        if (!record) throw new NotFoundException('Attendance record not found');
+        if (record.correctionStatus !== 'Pending') {
+            throw new BadRequestException('No pending correction request found for this record');
+        }
+
+        // 1. Update Status
+        record.correctionStatus = 'Rejected';
+
+        // 2. Push to Audit Trail
+        record.correctionHistory.push({
+            action: 'Rejected',
+            byRole: 'HR',
+            byAdminId: new Types.ObjectId(adminId),
+            remark: remark,
+            timestamp: new Date()
+        });
+
+        // 🚨 REMOVED: We no longer clear `activeCorrectionRequest` here either.
+
+        await record.save();
+        return record;
+    }
+
+    async getHistoricalLedger(query: {
+        page: number;
+        limit: number;
+        search?: string;
+        department?: string;
+        startDate?: string;
+        endDate?: string;
+        status?: string;
+    }) {
+        try {
+            const { page = 1, limit = 10, search, department, startDate, endDate, status } = query;
+            const skip = (page - 1) * limit;
+
+            // 1. Initial Match Stage (Attendance fields)
+            const initialMatch: any = {};
+
+            if (startDate && endDate) {
+                initialMatch.date = { $gte: startDate, $lte: endDate };
+            } else if (startDate) {
+                initialMatch.date = { $gte: startDate };
+            } else if (endDate) {
+                initialMatch.date = { $lte: endDate };
+            }
+
+            if (status) {
+                initialMatch.status = status;
+            }
+
+            if (search) {
+                const searchRegex = new RegExp(search, 'i');
+                initialMatch.$or = [
+                    { employeeName: searchRegex },
+                    { employeeCode: searchRegex }
+                ];
+            }
+
+            const pipeline: PipelineStage[] = [
+                { $match: initialMatch },
+
+                // 2. Lookup Employee Data
+                {
+                    $lookup: {
+                        from: 'employees',
+                        localField: 'employeeId',
+                        foreignField: '_id',
+                        as: 'employeeData'
+                    }
+                },
+                { $unwind: { path: '$employeeData', preserveNullAndEmptyArrays: true } },
+
+                // 3. Post-Lookup Match (Department)
+                ...(department ? [{ $match: { 'employeeData.department': department } }] : []),
+
+                // 4. Facet for Pagination & Data Extraction
+                {
+                    $facet: {
+                        metadata: [
+                            { $count: 'totalRecords' }
+                        ],
+                        data: [
+                            { $sort: { date: -1, inTime: -1 } }, // Newest first
+                            { $skip: skip },
+                            { $limit: Number(limit) },
+                            {
+                                $project: {
+                                    _id: 0,
+                                    attendanceId: '$_id',
+                                    date: 1,
+                                    employeeName: 1,
+                                    employeeCode: 1,
+                                    department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                                    avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] },
+                                    inTime: 1,
+                                    outTime: 1,
+                                    status: 1,
+                                    workMode: 1,
+                                    totalHours: 1,
+                                    isLate: 1,
+                                    lateMinutes: 1,
+                                    // EOD Report Fields for the Modal
+                                    todayWork: 1,
+                                    pendingWork: 1,
+                                    issuesFaced: 1
+                                }
+                            }
+                        ]
+                    }
+                }
+            ];
+
+            const result = await this.attendanceModel.aggregate(pipeline).exec();
+
+            const totalRecords = result[0]?.metadata[0]?.totalRecords || 0;
+            const totalPages = Math.ceil(totalRecords / limit);
+
+            return {
+                data: result[0]?.data || [],
+                meta: {
+                    totalRecords,
+                    totalPages,
+                    currentPage: Number(page),
+                    limit: Number(limit)
+                }
+            };
+
+        } catch (error) {
+            console.error('Database getHistoricalLedger failure:', error);
+            throw new InternalServerErrorException('Failed to fetch historical ledger');
+        }
+    }
+
+
+    // ─────────────────────────────────────── HR SEVICES END ──────────────────────────────────────────
 }

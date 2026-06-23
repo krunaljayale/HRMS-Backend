@@ -5,6 +5,7 @@ import { LeaveAppController } from './leave.app.controller';
 import { LeaveLedger, LeaveLedgerSchema } from './schemas/leave-ledger.schema';
 import { LeaveHistory, LeaveHistorySchema } from './schemas/leave-history.schema';
 import { EmployeeModule } from '../employee/employee.module';
+import { NotificationsModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { EmployeeModule } from '../employee/employee.module';
     ]),
 
     EmployeeModule,
+    NotificationsModule,
   ],
   controllers: [LeaveAppController],
   providers: [LeaveService],

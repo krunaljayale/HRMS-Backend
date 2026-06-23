@@ -1,13 +1,12 @@
 import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { LeaveHistory, LeaveHistoryDocument } from './schemas/leave-history.schema';
 import { EmployeeService } from '../employee/employee.service';
 import { IWorkflowStep } from './interfaces/workflow-step.interface';
 import { LeaveLedger, LeaveLedgerDocument } from './schemas/leave-ledger.schema';
-import { CreateCompOffLedgerDto } from './dto/create-comp-off-ledger.dto';
 import { createTodayISTThreshold, getIST } from '../utils/time.utils';
-import e from 'express';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class LeaveService {
@@ -15,6 +14,7 @@ export class LeaveService {
         @InjectModel(LeaveHistory.name) private leaveHistoryModel: Model<LeaveHistoryDocument>,
         @InjectModel(LeaveLedger.name) private leaveLedgerModel: Model<LeaveLedgerDocument>,
         private employeeService: EmployeeService,
+        private readonly notificationService: NotificationService,
     ) { }
 
     // ROUTING ENGINE ──
@@ -150,19 +150,79 @@ export class LeaveService {
         return leaveRequest;
     }
 
-    //  THE APPROVAL ENGINE (With Token Burning) ──
-    /**
-     * @param leaveId - The ID of the leave request
-     * @param actingProfile - How the user is acting ('Manager', 'HR', or 'Director')
-     * @param humanId - The ID of the actual employee clicking the button
-     */
+    // ─────────────────────────────────────── HR SEVICES START ──────────────────────────────────────────
+
+    // ── 1. FETCH PENDING LEAVES FOR HR ──
+    async getPendingLeavesForHR() {
+        const pipeline: PipelineStage[] = [
+            { $match: { overallStatus: 'Pending' } },
+
+            // Step 2: The Magic Array Filter
+            // This ensures the step at the current index is an HR step AND is Pending
+            {
+                $match: {
+                    $expr: {
+                        $let: {
+                            vars: {
+                                currentStep: { $arrayElemAt: ['$workflowSteps', '$currentStepIndex'] }
+                            },
+                            in: {
+                                $and: [
+                                    { $eq: ['$$currentStep.isHRProfileStep', true] },
+                                    { $eq: ['$$currentStep.status', 'Pending'] }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+
+            // Step 3: Lookup Employee Data
+            {
+                $lookup: {
+                    from: 'employees', // Must match your actual Employee collection name in MongoDB
+                    localField: 'employeeId',
+                    foreignField: '_id',
+                    as: 'employeeData'
+                }
+            },
+            { $unwind: { path: '$employeeData', preserveNullAndEmptyArrays: true } },
+
+            // Step 4: Sort (Oldest requests first so HR clears the backlog)
+            { $sort: { createdAt: 1 } },
+
+            // Step 5: Format to match the Frontend `PendingLeaveItem` Interface exactly
+            {
+                $project: {
+                    _id: 0,
+                    leaveId: '$_id',
+                    employeeName: { $ifNull: ['$employeeData.name', 'Unknown Employee'] },
+                    employeeCode: { $ifNull: ['$employeeData.employeeCode', 'N/A'] },
+                    department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                    avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] },
+                    leaveCategory: 1,
+                    startDate: 1,
+                    endDate: 1,
+                    totalDays: 1,
+                    isHalfDay: 1,
+                    halfDayPeriod: 1,
+                    reason: 1,
+                    appliedOn: '$createdAt'
+                }
+            }
+        ];
+
+
+        return await this.leaveHistoryModel.aggregate(pipeline).exec();
+    }
+
+    // ── 2. THE APPROVAL ENGINE ──
     async approveLeaveStep(leaveId: string, actingProfile: 'Manager' | 'HR' | 'Director', humanId: string) {
         const leave = await this.leaveHistoryModel.findById(leaveId);
 
         if (!leave) throw new NotFoundException('Leave request not found');
         if (leave.overallStatus !== 'Pending') throw new BadRequestException(`Leave is already ${leave.overallStatus}`);
 
-        // Get the current step that is waiting for action
         const currentStep = leave.workflowSteps[leave.currentStepIndex];
 
         // --- AUTHORIZATION CHECK ---
@@ -179,30 +239,80 @@ export class LeaveService {
         // --- UPDATE THE STEP ---
         currentStep.status = 'Approved';
         currentStep.actedById = new Types.ObjectId(humanId);
-        currentStep.actedAt = getIST() as Date; // Use centralized time util
+        currentStep.actedAt = new Date(); // Use getIST() if imported
 
         // --- ADVANCE THE WORKFLOW ---
         leave.currentStepIndex += 1;
 
-        // Check if that was the final step in the array
         if (leave.currentStepIndex >= leave.workflowSteps.length) {
             leave.overallStatus = 'Approved';
 
-            //  BURN THE TOKENS 
+            // 💰 BURN THE TOKENS AND RETURN "CHANGE" IF NEEDED
             if (leave.consumedLedgerIds && leave.consumedLedgerIds.length > 0) {
+                // 1. Fetch the actual tokens being consumed
+                const lockedTokens = await this.leaveLedgerModel.find({
+                    _id: { $in: leave.consumedLedgerIds }
+                });
+
+                // 2. Calculate the mathematical sum of the locked tokens
+                const totalTokenValue = lockedTokens.reduce((sum, token) => sum + (token.value || 1), 0);
+
+                // 3. Mark all locked tokens as Consumed to complete the transaction
                 await this.leaveLedgerModel.updateMany(
                     { _id: { $in: leave.consumedLedgerIds } },
                     { $set: { status: 'Consumed' } }
                 );
+
+                // 4. THE SPLIT LOGIC: Give "Change" back to the employee
+                if (totalTokenValue > leave.totalDays) {
+                    // Safe decimal math to avoid floating-point weirdness (e.g., 1.0 - 0.5 = 0.5)
+                    const refundValue = Number((totalTokenValue - leave.totalDays).toFixed(2));
+
+                    // Use the last token in the array as the "Base Token" to copy metadata from.
+                    // This ensures if it was a CompOff, the refund keeps the same expiry date.
+                    const baseToken = lockedTokens[lockedTokens.length - 1];
+
+                    // Mint a new fractional token back to the user's active wallet
+                    await this.leaveLedgerModel.create({
+                        employeeId: leave.employeeId,
+                        leaveType: baseToken.leaveType,
+                        status: 'Active',
+                        value: refundValue, // E.g., 0.5
+
+                        // Preserve original metadata so HR knows where this fraction came from
+                        fixedAllowanceMonth: baseToken.fixedAllowanceMonth,
+                        earnedFromAttendanceId: baseToken.earnedFromAttendanceId,
+                        expiryDate: baseToken.expiryDate
+                    });
+                }
             }
         }
 
         leave.markModified('workflowSteps');
         await leave.save();
+
+        // ... (Keep your FCM Notification logic here)
+
+        const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
+
+        if (employee && employee.fcmToken) {
+            // We don't await this because we don't want the HTTP response 
+            // to wait for Firebase to finish routing the notification.
+            this.notificationService.sendToEmployee({
+                token: employee.fcmToken,
+                title: "Leave Approved ✅",
+                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been approved by HR.`,
+                data: {
+                    type: "LEAVE_UPDATE",
+                    leaveId: leave._id.toString(),
+                    status: "Approved"
+                }
+            }).catch(e => console.error("FCM Async Error:", e));
+        }
         return leave;
     }
 
-    // THE REJECTION ENGINE (With Token Refunds) ──
+    // ── 3. THE REJECTION ENGINE ──
     async rejectLeave(leaveId: string, actingProfile: 'Manager' | 'HR' | 'Director', humanId: string, remarks?: string) {
         const leave = await this.leaveHistoryModel.findById(leaveId);
 
@@ -225,24 +335,159 @@ export class LeaveService {
         // --- RECORD THE REJECTION ---
         currentStep.status = 'Rejected';
         currentStep.actedById = new Types.ObjectId(humanId);
-        currentStep.actedAt = getIST() as Date;
-        currentStep.remarks = remarks; // Optional: Capture why it was rejected
+        currentStep.actedAt = new Date(); // Use getIST() if imported
+        currentStep.remarks = remarks;
 
-        // Halt the workflow and reject the entire application
         leave.overallStatus = 'Rejected';
 
-        //  REFUND THE TOKENS TO THE VAULT 
+        // REFUND THE TOKENS TO THE VAULT 
         if (leave.consumedLedgerIds && leave.consumedLedgerIds.length > 0) {
             await this.leaveLedgerModel.updateMany(
                 { _id: { $in: leave.consumedLedgerIds } },
-                { $set: { status: 'Active' } } // Unlocks them
+                { $set: { status: 'Active' } }
             );
         }
 
         leave.markModified('workflowSteps');
         await leave.save();
+        const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
+
+        if (employee && employee.fcmToken) {
+            // We don't await this because we don't want the HTTP response 
+            // to wait for Firebase to finish routing the notification.
+            this.notificationService.sendToEmployee({
+                token: employee.fcmToken,
+                title: "Leave Approved ✅",
+                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been approved by HR.`,
+                data: {
+                    type: "LEAVE_UPDATE",
+                    leaveId: leave._id.toString(),
+                    status: "Approved"
+                }
+            }).catch(e => console.error("FCM Async Error:", e));
+        }
         return leave;
     }
+
+    // ── 4. FETCH LEAVES HISTORICAL FOR HR ──
+    async getHistoricalLeaves(query: {
+        page: number;
+        limit: number;
+        search?: string;
+        department?: string;
+        startDate?: string;
+        endDate?: string;
+        status?: string;
+    }) {
+        const { page = 1, limit = 10, search, department, startDate, endDate, status } = query;
+        const skip = (page - 1) * limit;
+
+        const initialMatch: any = {};
+
+        // Dynamic Status Filtering
+        if (status) {
+            // If the UI sends a specific status (Pending, Approved, Rejected, Cancelled)
+            // Trust the UI and fetch exactly that.
+            initialMatch.overallStatus = status;
+        } else {
+            // If no status is selected in the UI, show HR's completed actions AND all Cancelled leaves
+            initialMatch.$or = [
+                {
+                    workflowSteps: {
+                        $elemMatch: {
+                            isHRProfileStep: true,
+                            status: { $in: ['Approved', 'Rejected'] }
+                        }
+                    }
+                },
+                { overallStatus: 'Cancelled' }
+            ];
+        }
+
+        // Date Overlap Logic: Find leaves that intersect the requested date range
+        if (startDate && endDate) {
+            initialMatch.startDate = { $lte: new Date(endDate) };
+            initialMatch.endDate = { $gte: new Date(startDate) };
+        } else if (startDate) {
+            initialMatch.endDate = { $gte: new Date(startDate) };
+        } else if (endDate) {
+            initialMatch.startDate = { $lte: new Date(endDate) };
+        }
+
+        const pipeline: any[] = [
+            { $match: initialMatch },
+            // Lookup Employee Data
+            {
+                $lookup: {
+                    from: 'employees', // Your employee collection name
+                    localField: 'employeeId',
+                    foreignField: '_id',
+                    as: 'employeeData'
+                }
+            },
+            { $unwind: { path: '$employeeData', preserveNullAndEmptyArrays: true } },
+
+            // Post-Lookup Match for Search & Department
+            {
+                $match: {
+                    ...(department ? { 'employeeData.department': department } : {}),
+                    ...(search ? {
+                        $or: [
+                            { 'employeeData.name': new RegExp(search, 'i') },
+                            { 'employeeData.employeeCode': new RegExp(search, 'i') }
+                        ]
+                    } : {})
+                }
+            },
+
+            // Facet for Pagination
+            {
+                $facet: {
+                    metadata: [{ $count: 'totalRecords' }],
+                    data: [
+                        { $sort: { createdAt: -1 } }, // Newest first
+                        { $skip: skip },
+                        { $limit: Number(limit) },
+                        {
+                            $project: {
+                                _id: 0,
+                                leaveId: '$_id',
+                                employeeName: { $ifNull: ['$employeeData.name', 'Unknown Employee'] },
+                                employeeCode: { $ifNull: ['$employeeData.employeeCode', 'N/A'] },
+                                department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                                avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] },
+                                leaveCategory: 1,
+                                startDate: 1,
+                                endDate: 1,
+                                totalDays: 1,
+                                isHalfDay: 1,
+                                halfDayPeriod: 1,
+                                overallStatus: 1,
+                                reason: 1,
+                                appliedOn: '$createdAt',
+                                workflowSteps: 1
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const result = await this.leaveHistoryModel.aggregate(pipeline).exec();
+        const totalRecords = result[0]?.metadata[0]?.totalRecords || 0;
+
+        return {
+            data: result[0]?.data || [],
+            meta: {
+                totalRecords,
+                totalPages: Math.ceil(totalRecords / limit),
+                currentPage: Number(page),
+                limit: Number(limit)
+            }
+        };
+    }
+    // ─────────────────────────────────────── HR SEVICES END ──────────────────────────────────────────
+
 
     // LEDGER CREATION & RETRIEVAL ──
     // Notice we added 'value' to the DTO payload

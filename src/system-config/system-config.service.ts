@@ -7,7 +7,7 @@ import { SystemConfig, SystemConfigDocument } from './schemas/system-config.sche
 export class SystemConfigService {
   constructor(
     @InjectModel(SystemConfig.name) private systemConfigModel: Model<SystemConfigDocument>,
-  ) {}
+  ) { }
 
   async getActiveConfig() {
     // 1. Fetch the single config document
@@ -27,7 +27,7 @@ export class SystemConfigService {
     // 3. Calculate today's exact shift hours based on the SERVER'S timezone
     const serverDate = new Date();
     const isSaturday = serverDate.getDay() === 6;
-    
+
     const activeShiftHours = isSaturday ? config.saturdayShiftHours : config.defaultShiftHours;
 
     // 4. Map the MongoDB document to the exact JSON structure the React Native app expects
@@ -35,7 +35,27 @@ export class SystemConfigService {
       office_lat: config.officeLat,
       office_lon: config.officeLon,
       radius_meters: config.radiusMeters,
-      shift_hours: activeShiftHours, 
+      shift_hours: activeShiftHours,
+    };
+  }
+
+  async getShiftRulesForDate(dateString: string | Date) {
+    const config = await this.systemConfigModel.findOne().exec();
+    const defaultHours = config?.defaultShiftHours || 8.5;
+    const saturdayHours = config?.saturdayShiftHours || 7.0;
+
+    const recordDate = new Date(dateString);
+    const dayOfWeek = recordDate.getDay(); // 0 = Sunday, 6 = Saturday
+    const isSunday = dayOfWeek === 0;
+
+    const shiftHours = dayOfWeek === 6 ? saturdayHours : defaultHours;
+    const shiftMinutes = shiftHours * 60;
+
+    return {
+      shiftMinutes,
+      halfDayHurdle: shiftMinutes / 2,
+      tenMinuteGrace: 10,
+      isSunday
     };
   }
 }

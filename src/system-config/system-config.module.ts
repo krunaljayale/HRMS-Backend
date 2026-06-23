@@ -8,5 +8,6 @@ import { SystemConfig, SystemConfigSchema } from './schemas/system-config.schema
   imports: [MongooseModule.forFeature([{ name: SystemConfig.name, schema: SystemConfigSchema }])],
   controllers: [SystemConfigController],
   providers: [SystemConfigService],
+  exports: [SystemConfigService],
 })
 export class SystemConfigModule { }

@@ -356,4 +356,60 @@ export class EmployeeService {
             throw new InternalServerErrorException('Failed to retrieve recent hires');
         }
     }
+
+    async getAllEmployeesForHR(search?: string, department?: string, status?: string, page: number = 1, limit: number = 10) {
+        const query: any = {};
+
+        // 1. Apply exact match filters
+        if (department) query.department = department;
+        if (status) query.status = status;
+
+        // 2. Apply search filter
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { employeeCode: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // 3. Calculate skip value
+        const skip = (page - 1) * limit;
+
+        // 4. Run Count and Find in parallel for better performance
+        const [employees, totalRecords] = await Promise.all([
+            this.employeeModel
+                .find(query)
+                .select('employeeCode name email department position status profileImageUrl managerId')
+                .populate('managerId', 'name')
+                .sort({ employeeCode: 1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            this.employeeModel.countDocuments(query)
+        ]);
+
+        // 5. Map the data
+        const data = employees.map((emp: any) => ({
+            _id: emp._id.toString(),
+            employeeCode: emp.employeeCode,
+            name: emp.name,
+            email: emp.email,
+            department: emp.department,
+            position: emp.position,
+            status: emp.status,
+            profileImageUrl: emp.profileImageUrl,
+            managerName: emp.managerId?.name || undefined,
+        }));
+
+        // 6. Return structured response with Meta
+        return {
+            data,
+            meta: {
+                totalRecords,
+                totalPages: Math.ceil(totalRecords / limit),
+                currentPage: page,
+                limit
+            }
+        };
+    }
 }

@@ -340,16 +340,18 @@ export class LeaveService {
 
         leave.overallStatus = 'Rejected';
 
-        // REFUND THE TOKENS TO THE VAULT 
+        // 💰 REFUND THE TOKENS TO THE VAULT (Added 'Locked' safety check)
         if (leave.consumedLedgerIds && leave.consumedLedgerIds.length > 0) {
             await this.leaveLedgerModel.updateMany(
-                { _id: { $in: leave.consumedLedgerIds } },
+                { _id: { $in: leave.consumedLedgerIds }, status: 'Locked' },
                 { $set: { status: 'Active' } }
             );
         }
 
         leave.markModified('workflowSteps');
         await leave.save();
+
+        // 📱 FIREBASE PUSH NOTIFICATION
         const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
 
         if (employee && employee.fcmToken) {
@@ -357,15 +359,17 @@ export class LeaveService {
             // to wait for Firebase to finish routing the notification.
             this.notificationService.sendToEmployee({
                 token: employee.fcmToken,
-                title: "Leave Approved ✅",
-                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been approved by HR.`,
+                title: "Leave Rejected ❌",
+                // Dynamically tell them who rejected it (Manager, HR, or Director)
+                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been rejected by ${actingProfile}.`,
                 data: {
                     type: "LEAVE_UPDATE",
                     leaveId: leave._id.toString(),
-                    status: "Approved"
+                    status: "Rejected"
                 }
             }).catch(e => console.error("FCM Async Error:", e));
         }
+
         return leave;
     }
 

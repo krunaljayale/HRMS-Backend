@@ -213,4 +213,25 @@ export class HrWebController {
     };
   }
 
+  @Get('employees')
+  @UseGuards(JwtAuthGuard)
+  async getAllEmployees(
+    @Query('search') search?: string,
+    @Query('department') department?: string,
+    @Query('status') status?: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ) {
+    const result = await this.employeeService.getAllEmployeesForHR(
+      search, department, status, Number(page), Number(limit)
+    );
+
+    return {
+      success: true,
+      message: 'Employees fetched successfully',
+      data: result.data,
+      meta: result.meta
+    };
+  }
+
 }

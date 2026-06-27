@@ -55,7 +55,7 @@ export class PayrollService {
         let current = new Date(effectiveStartDate);
 
         while (current <= toDate) {
-            // FIX: Generate the YYYY-MM-DD string strictly in IST
+            // Generate the YYYY-MM-DD string strictly in IST
             const dStr = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Kolkata',
                 year: 'numeric',
@@ -63,7 +63,7 @@ export class PayrollService {
                 day: '2-digit'
             }).format(current);
 
-            // FIX: Check if the day is Sunday strictly in IST
+            // Check if the day is Sunday strictly in IST
             const isSunday = new Intl.DateTimeFormat('en-US', {
                 timeZone: 'Asia/Kolkata',
                 weekday: 'short'
@@ -78,6 +78,28 @@ export class PayrollService {
             });
 
             const record = attendances.find(a => a.date === dStr);
+
+            /// Strict YYYY-MM-DD String Comparison
+            const leaveRecord = approvedLeaves.find(l => {
+                // Convert DB ISODates to strict IST YYYY-MM-DD strings
+                const startStr = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                }).format(new Date(l.startDate));
+
+                const endStr = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                }).format(new Date(l.endDate));
+
+                // Compare strings directly against dStr (e.g., "2026-06-26" >= "2026-06-26")
+                return dStr >= startStr && dStr <= endStr;
+            });
+
             let dayStatus = 'Absent'; // Default to absent
             let isFreeDay = false;
 
@@ -89,22 +111,34 @@ export class PayrollService {
                 dayStatus = 'Holiday';
                 isFreeDay = true;
                 scheduledFreeDays++;
-            } else if (record) {
-                if (record.status === 'P') {
-                    dayStatus = 'Present';
-                } else if (record.status === 'Half') {
-                    dayStatus = 'HalfDay';
-                } else if (['Coff', 'CompOff'].includes(record.status)) {
-                    dayStatus = 'CompOff';
-                } else if (record.status === 'HalfCompOff') {
-                    dayStatus = 'HalfCompOff';
-                } else if (['Paid', 'Sick', 'Casual', 'Earned'].includes(record.status)) {
-                    const hasLeave = approvedLeaves.some(l => {
-                        const start = l.startDate instanceof Date ? l.startDate : new Date(l.startDate);
-                        const end = l.endDate instanceof Date ? l.endDate : new Date(l.endDate);
-                        return current >= start && current <= end;
-                    });
-                    dayStatus = hasLeave ? 'PaidLeave' : 'Absent';
+            } else {
+                if (record) {
+                    if (record.status === 'P') {
+                        dayStatus = 'Present';
+                    } else if (record.status === 'Half') {
+                        // COLLISION CHECK: Did they work half day AND take half leave?
+                        if (leaveRecord) {
+                            dayStatus = 'HalfPresent_HalfPaidLeave';
+                        } else {
+                            dayStatus = 'HalfDay';
+                        }
+                    } else if (['Coff', 'CompOff'].includes(record.status)) {
+                        dayStatus = 'CompOff';
+                    } else if (record.status === 'HalfCompOff') {
+                        dayStatus = 'HalfCompOff';
+                    } else if (['Paid', 'Sick', 'Casual', 'Earned', 'A'].includes(record.status)) {
+                        if (leaveRecord) {
+                            dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
+                        } else {
+                            dayStatus = 'Absent';
+                        }
+                    }
+                } else {
+                    if (leaveRecord) {
+                        dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
+                    } else {
+                        dayStatus = 'Absent';
+                    }
                 }
             }
 
@@ -113,8 +147,11 @@ export class PayrollService {
         }
 
         // --- PHASE 2: THE SANDWICH SCANNER ---
-        // 'Absent' and 'PaidLeave' act as bridge builders.
-        const bridgeBuilders = ['Absent', 'PaidLeave'];
+        const bridgeBuilders = [
+            'Absent',
+            'PaidLeave',
+            'CompOff'
+        ];
 
         for (let i = 0; i < timeline.length; i++) {
             if (timeline[i].isFreeDay) {
@@ -127,7 +164,7 @@ export class PayrollService {
                         if (bridgeBuilders.includes(timeline[j].status)) {
                             leftBuilder = true;
                         }
-                        break; // Stop looking once we hit a working day
+                        break;
                     }
                 }
 
@@ -137,7 +174,7 @@ export class PayrollService {
                         if (bridgeBuilders.includes(timeline[k].status)) {
                             rightBuilder = true;
                         }
-                        break; // Stop looking once we hit a working day
+                        break;
                     }
                 }
 
@@ -171,31 +208,41 @@ export class PayrollService {
             } else if (day.status === 'Holiday') {
                 holidayCount++;
                 paidDaysBreakdown.push({ date: day.date, type: 'Holiday', value: 1 });
-            } else if (day.status === 'Absent' || day.status === 'Sandwiched') {
-                // Notice that a 'Sandwiched' day simply drops into the Absent bucket.
-                // It does NOT get pushed to the paidDaysBreakdown array.
+            }
+            // PROCESS COLLISION: Split the single day into two separate records for the frontend
+            else if (day.status === 'HalfPresent_HalfPaidLeave') {
+                half++; // 0.5 paid value for the working hours
+                paidLeaveCount += 0.5; // 0.5 paid value for the leave
+
+                paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
+                paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
+            } else if (day.status === 'HalfPaidLeave') {
+                paidLeaveCount += 0.5;
+                absent += 0.5;
+                paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
+            }
+            else if (day.status === 'Absent' || day.status === 'Sandwiched') {
                 absent++;
             }
         }
 
-        // Apply Math via Helpers
+        // --- PHASE 4: APPLY MATH ---
         const paidDays = present + compOffCount + (half * 0.5) + paidLeaveCount + weekOffCount + holidayCount;
         const leavesTaken = absent + (half * 0.5);
 
         const totalCTC = employee.salary || 0;
         const structure = employee.salaryStructure || { basicPercentage: 100, allowancePercentage: 0 };
-        const { basic, allowances } = calculateSalarySplit(totalCTC, structure);
+        const { basic, allowances } = calculateSalarySplit(totalCTC, structure); // Ensure this helper exists in your scope
 
-        const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays);
+        const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays); // Ensure this helper exists in your scope
         const pr_allowances = calculateProratedAmount(allowances, totalCycleDays, paidDays);
         const totalGross = pr_basic + pr_allowances;
 
-        const professionalTax = calculatePT(basic, employee.gender, toDate.getUTCMonth());
+        const professionalTax = calculatePT(basic, employee.gender, toDate.getUTCMonth()); // Ensure this helper exists
         const netSalary = Math.max(0, totalGross - professionalTax);
 
         return {
             totalCycleDays,
-            // Calculate scheduled days minus scheduledFreeDays to ensure denominator remains static
             workingDays: (Math.floor((toDate.getTime() - effectiveStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1) - scheduledFreeDays,
             presentDays: present,
             compOffDays: compOffCount,

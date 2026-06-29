@@ -1,19 +1,21 @@
+//main.ts
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { initializeApp, getApps, applicationDefault } from 'firebase-admin/app';
 
 async function bootstrap() {
 
   if (!getApps().length) {
-    const serviceAccount = require('../src/notification/fcm-config/firebase-adminsdk.json');
-
+    // 🚀 We removed the direct 'require' path. 
+    // Firebase will now automatically use the GOOGLE_APPLICATION_CREDENTIALS environment variable.
     initializeApp({
-      credential: cert(serviceAccount),
+      credential: applicationDefault(),
     });
-    console.log('🔥 Firebase Admin successfully initialized');
+    // console.log('🔥 Firebase Admin successfully initialized');
   }
   const app = await NestFactory.create(AppModule);
 
@@ -45,7 +47,6 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Accept, Authorization',
   });
-
 
   await app.listen(port);
 }

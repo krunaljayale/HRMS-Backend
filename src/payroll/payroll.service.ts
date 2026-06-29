@@ -27,6 +27,249 @@ export class PayrollService {
     ) { }
 
     // ── CORE ENGINE: SHARED PAYROLL CALCULATOR ──
+    // private async calculatePayrollMetrics(employeeId: string, employee: any, fromDate: Date, toDate: Date) {
+    //     // 1. The denominator for salary math MUST remain the total days in the actual cycle
+    //     const totalCycleDays = Math.floor((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+    //     // Fetch Data Concurrently
+    //     const [attendances, holidays, approvedLeaves] = await Promise.all([
+    //         this.attendanceService.findRecordsInRange(employeeId, fromDate, toDate),
+    //         this.holidayService.findHolidaysInRange(fromDate, toDate),
+    //         this.leaveService.findApprovedLeavesInRange(employeeId, fromDate, toDate)
+    //     ]);
+
+    //     let present = 0, half = 0, absent = 0, paidLeaveCount = 0, holidayCount = 0, weekOffCount = 0, compOffCount = 0;
+    //     const paidDaysBreakdown: { date: string; type: string; value: number }[] = [];
+
+    //     // Calculate Effective Start Date
+    //     const cycleStartDate = new Date(fromDate);
+    //     let joiningDate = cycleStartDate;
+    //     if (employee.joiningDate) {
+    //         joiningDate = new Date(employee.joiningDate);
+    //     }
+    //     const effectiveStartDate = joiningDate > cycleStartDate ? joiningDate : cycleStartDate;
+
+    //     // --- PHASE 1: BUILD THE TIMELINE ---
+    //     const timeline: { date: string; status: string; isFreeDay: boolean }[] = [];
+    //     let scheduledFreeDays = 0; // Tracks absolute free days to keep workingDays math stable
+    //     let current = new Date(effectiveStartDate);
+
+    //     while (current <= toDate) {
+    //         // Generate the YYYY-MM-DD string strictly in IST
+    //         const dStr = new Intl.DateTimeFormat('en-CA', {
+    //             timeZone: 'Asia/Kolkata',
+    //             year: 'numeric',
+    //             month: '2-digit',
+    //             day: '2-digit'
+    //         }).format(current);
+
+    //         // Check if the day is Sunday strictly in IST
+    //         const isSunday = new Intl.DateTimeFormat('en-US', {
+    //             timeZone: 'Asia/Kolkata',
+    //             weekday: 'short'
+    //         }).format(current) === 'Sun';
+
+    //         const isHolid = holidays.some(h => {
+    //             const hDate = h.date instanceof Date ? h.date : new Date(h.date);
+    //             const h_yyyy = hDate.getFullYear();
+    //             const h_mm = String(hDate.getMonth() + 1).padStart(2, '0');
+    //             const h_dd = String(hDate.getDate()).padStart(2, '0');
+    //             return `${h_yyyy}-${h_mm}-${h_dd}` === dStr;
+    //         });
+
+    //         const record = attendances.find(a => a.date === dStr);
+
+    //         /// Strict YYYY-MM-DD String Comparison
+    //         const leaveRecord = approvedLeaves.find(l => {
+    //             // Convert DB ISODates to strict IST YYYY-MM-DD strings
+    //             const startStr = new Intl.DateTimeFormat('en-CA', {
+    //                 timeZone: 'Asia/Kolkata',
+    //                 year: 'numeric',
+    //                 month: '2-digit',
+    //                 day: '2-digit'
+    //             }).format(new Date(l.startDate));
+
+    //             const endStr = new Intl.DateTimeFormat('en-CA', {
+    //                 timeZone: 'Asia/Kolkata',
+    //                 year: 'numeric',
+    //                 month: '2-digit',
+    //                 day: '2-digit'
+    //             }).format(new Date(l.endDate));
+
+    //             // Compare strings directly against dStr (e.g., "2026-06-26" >= "2026-06-26")
+    //             return dStr >= startStr && dStr <= endStr;
+    //         });
+
+    //         let dayStatus = 'Absent'; // Default to absent
+    //         let isFreeDay = false;
+
+    //         if (isSunday) {
+    //             dayStatus = 'WeekOff';
+    //             isFreeDay = true;
+    //             scheduledFreeDays++;
+    //         } else if (isHolid) {
+    //             dayStatus = 'Holiday';
+    //             isFreeDay = true;
+    //             scheduledFreeDays++;
+    //         } else {
+    //             if (record) {
+    //                 if (record.status === 'P') {
+    //                     dayStatus = 'Present';
+    //                 } else if (record.status === 'Half') {
+    //                     // COLLISION CHECK: Did they work half day AND take half leave?
+    //                     if (leaveRecord) {
+    //                         dayStatus = 'HalfPresent_HalfPaidLeave';
+    //                     } else {
+    //                         dayStatus = 'HalfDay';
+    //                     }
+    //                 } else if (['Coff', 'CompOff'].includes(record.status)) {
+    //                     dayStatus = 'CompOff';
+    //                 } else if (record.status === 'HalfCompOff') {
+    //                     dayStatus = 'HalfCompOff';
+    //                 } else if (['Paid', 'Sick', 'Casual', 'Earned', 'A'].includes(record.status)) {
+    //                     if (leaveRecord) {
+    //                         dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
+    //                     } else {
+    //                         dayStatus = 'Absent';
+    //                     }
+    //                 }
+    //             } else {
+    //                 if (leaveRecord) {
+    //                     dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
+    //                 } else {
+    //                     dayStatus = 'Absent';
+    //                 }
+    //             }
+    //         }
+
+    //         timeline.push({ date: dStr, status: dayStatus, isFreeDay });
+    //         current.setTime(current.getTime() + (24 * 60 * 60 * 1000));
+    //     }
+
+    //     // --- PHASE 2: THE SANDWICH SCANNER ---
+    //     const bridgeBuilders = [
+    //         'Absent',
+    //         'PaidLeave',
+    //         'CompOff'
+    //     ];
+
+    //     for (let i = 0; i < timeline.length; i++) {
+    //         if (timeline[i].isFreeDay) {
+    //             let leftBuilder = false;
+    //             let rightBuilder = false;
+
+    //             // Look backwards for the first working day
+    //             for (let j = i - 1; j >= 0; j--) {
+    //                 if (!timeline[j].isFreeDay) {
+    //                     if (bridgeBuilders.includes(timeline[j].status)) {
+    //                         leftBuilder = true;
+    //                     }
+    //                     break;
+    //                 }
+    //             }
+
+    //             // Look forwards for the first working day
+    //             for (let k = i + 1; k < timeline.length; k++) {
+    //                 if (!timeline[k].isFreeDay) {
+    //                     if (bridgeBuilders.includes(timeline[k].status)) {
+    //                         rightBuilder = true;
+    //                     }
+    //                     break;
+    //                 }
+    //             }
+
+    //             // If both sides are building the bridge, penalize the free day!
+    //             if (leftBuilder && rightBuilder) {
+    //                 timeline[i].status = 'Sandwiched';
+    //             }
+    //         }
+    //     }
+
+    //     // --- PHASE 3: TALLY THE RESULTS ---
+    //     for (const day of timeline) {
+    //         if (day.status === 'Present') {
+    //             present++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'Present', value: 1 });
+    //         } else if (day.status === 'HalfDay') {
+    //             half++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
+    //         } else if (day.status === 'CompOff') {
+    //             compOffCount++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'CompOff', value: 1 });
+    //         } else if (day.status === 'HalfCompOff') {
+    //             compOffCount += 0.5;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'HalfCompOff', value: 0.5 });
+    //         } else if (day.status === 'PaidLeave') {
+    //             paidLeaveCount++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 1 });
+    //         } else if (day.status === 'WeekOff') {
+    //             weekOffCount++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'WeekOff', value: 1 });
+    //         } else if (day.status === 'Holiday') {
+    //             holidayCount++;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'Holiday', value: 1 });
+    //         }
+    //         // PROCESS COLLISION: Split the single day into two separate records for the frontend
+    //         else if (day.status === 'HalfPresent_HalfPaidLeave') {
+    //             half++; // 0.5 paid value for the working hours
+    //             paidLeaveCount += 0.5; // 0.5 paid value for the leave
+
+    //             paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
+    //             paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
+    //         } else if (day.status === 'HalfPaidLeave') {
+    //             paidLeaveCount += 0.5;
+    //             absent += 0.5;
+    //             paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
+    //         }
+    //         else if (day.status === 'Absent' || day.status === 'Sandwiched') {
+    //             absent++;
+    //         }
+    //     }
+
+    //     // --- PHASE 4: APPLY MATH ---
+    //     const paidDays = present + compOffCount + (half * 0.5) + paidLeaveCount + weekOffCount + holidayCount;
+    //     const leavesTaken = absent + (half * 0.5);
+
+    //     const totalCTC = employee.salary || 0;
+    //     const structure = employee.salaryStructure || { basicPercentage: 100, allowancePercentage: 0 };
+    //     const { basic, allowances } = calculateSalarySplit(totalCTC, structure); // Ensure this helper exists in your scope
+
+    //     const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays); // Ensure this helper exists in your scope
+    //     const pr_allowances = calculateProratedAmount(allowances, totalCycleDays, paidDays);
+    //     const totalGross = pr_basic + pr_allowances;
+
+    //     const professionalTax = calculatePT(basic, employee.gender, toDate.getUTCMonth()); // Ensure this helper exists
+    //     const netSalary = Math.max(0, totalGross - professionalTax);
+
+    //     return {
+    //         totalCycleDays,
+    //         workingDays: (Math.floor((toDate.getTime() - effectiveStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1) - scheduledFreeDays,
+    //         presentDays: present,
+    //         compOffDays: compOffCount,
+    //         halfDays: half,
+    //         absentDays: absent,
+    //         paidLeaves: paidLeaveCount,
+    //         unpaidLeaves: absent,
+    //         holidays: holidayCount,
+    //         weekOffs: weekOffCount,
+    //         leavesTaken,
+    //         paidDays,
+    //         paidDaysBreakdown,
+    //         earnings: {
+    //             basic: pr_basic,
+    //             allowances: pr_allowances,
+    //             totalGross: parseFloat(totalGross.toFixed(2))
+    //         },
+    //         deductions: {
+    //             professionalTax,
+    //             taxDeductedAtSource: 0,
+    //             other: 0,
+    //             totalDeductions: professionalTax
+    //         },
+    //         netSalary: parseFloat(netSalary.toFixed(2))
+    //     };
+    // }
+
     private async calculatePayrollMetrics(employeeId: string, employee: any, fromDate: Date, toDate: Date) {
         // 1. The denominator for salary math MUST remain the total days in the actual cycle
         const totalCycleDays = Math.floor((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -41,7 +284,7 @@ export class PayrollService {
         let present = 0, half = 0, absent = 0, paidLeaveCount = 0, holidayCount = 0, weekOffCount = 0, compOffCount = 0;
         const paidDaysBreakdown: { date: string; type: string; value: number }[] = [];
 
-        // Calculate Effective Start Date
+        // Calculate Effective Start Date (Joining Date Logic)
         const cycleStartDate = new Date(fromDate);
         let joiningDate = cycleStartDate;
         if (employee.joiningDate) {
@@ -55,7 +298,7 @@ export class PayrollService {
         let current = new Date(effectiveStartDate);
 
         while (current <= toDate) {
-            // Generate the YYYY-MM-DD string strictly in IST
+            // Generate the YYYY-MM-DD string strictly in IST to match your new schema
             const dStr = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Kolkata',
                 year: 'numeric',
@@ -63,44 +306,40 @@ export class PayrollService {
                 day: '2-digit'
             }).format(current);
 
-            // Check if the day is Sunday strictly in IST
             const isSunday = new Intl.DateTimeFormat('en-US', {
                 timeZone: 'Asia/Kolkata',
                 weekday: 'short'
             }).format(current) === 'Sun';
 
+            // 🛡️ HOLIDAY TIMEZONE FIX: Convert MongoDB Date to IST string before comparing
             const isHolid = holidays.some(h => {
                 const hDate = h.date instanceof Date ? h.date : new Date(h.date);
-                const h_yyyy = hDate.getFullYear();
-                const h_mm = String(hDate.getMonth() + 1).padStart(2, '0');
-                const h_dd = String(hDate.getDate()).padStart(2, '0');
-                return `${h_yyyy}-${h_mm}-${h_dd}` === dStr;
-            });
-
-            const record = attendances.find(a => a.date === dStr);
-
-            /// Strict YYYY-MM-DD String Comparison
-            const leaveRecord = approvedLeaves.find(l => {
-                // Convert DB ISODates to strict IST YYYY-MM-DD strings
-                const startStr = new Intl.DateTimeFormat('en-CA', {
+                const hStr = new Intl.DateTimeFormat('en-CA', {
                     timeZone: 'Asia/Kolkata',
                     year: 'numeric',
                     month: '2-digit',
                     day: '2-digit'
+                }).format(hDate);
+                return hStr === dStr;
+            });
+
+            // Exact string match based on your new schema
+            const record = attendances.find(a => a.date === dStr);
+
+            // LEAVE SCHEDULER: Also formatted to IST strings for safe comparison
+            const leaveRecord = approvedLeaves.find(l => {
+                const startStr = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
                 }).format(new Date(l.startDate));
 
                 const endStr = new Intl.DateTimeFormat('en-CA', {
-                    timeZone: 'Asia/Kolkata',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit'
+                    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
                 }).format(new Date(l.endDate));
 
-                // Compare strings directly against dStr (e.g., "2026-06-26" >= "2026-06-26")
                 return dStr >= startStr && dStr <= endStr;
             });
 
-            let dayStatus = 'Absent'; // Default to absent
+            let dayStatus = 'Absent';
             let isFreeDay = false;
 
             if (isSunday) {
@@ -112,33 +351,39 @@ export class PayrollService {
                 isFreeDay = true;
                 scheduledFreeDays++;
             } else {
-                if (record) {
-                    if (record.status === 'P') {
-                        dayStatus = 'Present';
-                    } else if (record.status === 'Half') {
-                        // COLLISION CHECK: Did they work half day AND take half leave?
-                        if (leaveRecord) {
-                            dayStatus = 'HalfPresent_HalfPaidLeave';
-                        } else {
-                            dayStatus = 'HalfDay';
-                        }
-                    } else if (['Coff', 'CompOff'].includes(record.status)) {
-                        dayStatus = 'CompOff';
-                    } else if (record.status === 'HalfCompOff') {
-                        dayStatus = 'HalfCompOff';
-                    } else if (['Paid', 'Sick', 'Casual', 'Earned', 'A'].includes(record.status)) {
-                        if (leaveRecord) {
-                            dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
-                        } else {
-                            dayStatus = 'Absent';
-                        }
-                    }
-                } else {
-                    if (leaveRecord) {
-                        dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave' : 'PaidLeave';
+                // 1. Physically Worked (Full Day)
+                if (record && record.status === 'P') {
+                    dayStatus = 'Present';
+                }
+                // 2. Physically Worked (Half Day)
+                else if (record && record.status === 'Half') {
+                    // 🛡️ SCHEMA FIX: Using leaveCategory instead of leaveType
+                    if (leaveRecord && leaveRecord.leaveCategory === 'Paid') {
+                        dayStatus = 'HalfPresent_HalfPaidLeave';
                     } else {
-                        dayStatus = 'Absent';
+                        dayStatus = 'HalfDay';
                     }
+                }
+                // 3. Compensatory Offs
+                else if (record && record.status === 'CompOff') {
+                    dayStatus = 'CompOff';
+                }
+                else if (record && record.status === 'HalfCompOff') {
+                    dayStatus = 'HalfCompOff';
+                }
+                // 4. No physical presence -> Check Leave Schema strictly for 'Paid'
+                else if (leaveRecord) {
+                    // 🛡️ STRICT PAID LEAVE RULE: Only 'Paid' category generates pay
+                    if (leaveRecord.leaveCategory === 'Paid') {
+                        // If they are not physically present, but have a half-day paid leave ticket, they lose the other half
+                        dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave_HalfAbsent' : 'PaidLeave';
+                    } else {
+                        dayStatus = 'Absent'; // Unpaid, Sick, Casual, Other without physical presence = Absent
+                    }
+                }
+                // 5. No physical presence, no leave ticket (Record might be 'A', 'L', 'AUTO', or undefined)
+                else {
+                    dayStatus = 'Absent';
                 }
             }
 
@@ -147,10 +392,13 @@ export class PayrollService {
         }
 
         // --- PHASE 2: THE SANDWICH SCANNER ---
+        // Rule: ONLY full days of non-presence can build a bridge.
+        // Any status representing physical presence (HalfDay, HalfCompOff, Present, HalfPresent_HalfPaidLeave) is EXCLUDED.
         const bridgeBuilders = [
             'Absent',
             'PaidLeave',
-            'CompOff'
+            'CompOff',
+            'HalfPaidLeave_HalfAbsent'
         ];
 
         for (let i = 0; i < timeline.length; i++) {
@@ -158,7 +406,7 @@ export class PayrollService {
                 let leftBuilder = false;
                 let rightBuilder = false;
 
-                // Look backwards for the first working day
+                // Look backwards
                 for (let j = i - 1; j >= 0; j--) {
                     if (!timeline[j].isFreeDay) {
                         if (bridgeBuilders.includes(timeline[j].status)) {
@@ -168,7 +416,7 @@ export class PayrollService {
                     }
                 }
 
-                // Look forwards for the first working day
+                // Look forwards
                 for (let k = i + 1; k < timeline.length; k++) {
                     if (!timeline[k].isFreeDay) {
                         if (bridgeBuilders.includes(timeline[k].status)) {
@@ -178,7 +426,7 @@ export class PayrollService {
                     }
                 }
 
-                // If both sides are building the bridge, penalize the free day!
+                // Penalize the free day ONLY if fully sandwiched
                 if (leftBuilder && rightBuilder) {
                     timeline[i].status = 'Sandwiched';
                 }
@@ -198,7 +446,9 @@ export class PayrollService {
                 paidDaysBreakdown.push({ date: day.date, type: 'CompOff', value: 1 });
             } else if (day.status === 'HalfCompOff') {
                 compOffCount += 0.5;
+                half++; // The other half was worked
                 paidDaysBreakdown.push({ date: day.date, type: 'HalfCompOff', value: 0.5 });
+                paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
             } else if (day.status === 'PaidLeave') {
                 paidLeaveCount++;
                 paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 1 });
@@ -209,36 +459,35 @@ export class PayrollService {
                 holidayCount++;
                 paidDaysBreakdown.push({ date: day.date, type: 'Holiday', value: 1 });
             }
-            // PROCESS COLLISION: Split the single day into two separate records for the frontend
+            // ── SPLIT COLLISIONS FOR FRONTEND ACCURACY ──
             else if (day.status === 'HalfPresent_HalfPaidLeave') {
-                half++; // 0.5 paid value for the working hours
-                paidLeaveCount += 0.5; // 0.5 paid value for the leave
-
+                half++;
+                paidLeaveCount += 0.5;
                 paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
                 paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
-            } else if (day.status === 'HalfPaidLeave') {
+            } else if (day.status === 'HalfPaidLeave_HalfAbsent') {
                 paidLeaveCount += 0.5;
                 absent += 0.5;
                 paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
-            }
-            else if (day.status === 'Absent' || day.status === 'Sandwiched') {
+            } else if (day.status === 'Absent' || day.status === 'Sandwiched') {
                 absent++;
             }
         }
 
         // --- PHASE 4: APPLY MATH ---
         const paidDays = present + compOffCount + (half * 0.5) + paidLeaveCount + weekOffCount + holidayCount;
-        const leavesTaken = absent + (half * 0.5);
+        const leavesTaken = absent + (half * 0.5); // Includes full absent days, half deductions, and sandwich deductions
 
         const totalCTC = employee.salary || 0;
         const structure = employee.salaryStructure || { basicPercentage: 100, allowancePercentage: 0 };
-        const { basic, allowances } = calculateSalarySplit(totalCTC, structure); // Ensure this helper exists in your scope
 
-        const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays); // Ensure this helper exists in your scope
+        // Assumes these helpers are defined elsewhere in your class/file
+        const { basic, allowances } = calculateSalarySplit(totalCTC, structure);
+        const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays);
         const pr_allowances = calculateProratedAmount(allowances, totalCycleDays, paidDays);
         const totalGross = pr_basic + pr_allowances;
 
-        const professionalTax = calculatePT(basic, employee.gender, toDate.getUTCMonth()); // Ensure this helper exists
+        const professionalTax = calculatePT(basic, employee.gender, toDate.getUTCMonth());
         const netSalary = Math.max(0, totalGross - professionalTax);
 
         return {

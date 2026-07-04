@@ -1,9 +1,11 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import { HrService } from './hr.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AttendanceService } from '../attendance/attendance.service';
 import { EmployeeService } from '../employee/employee.service';
 import { LeaveService } from '../leave/leave.service';
+import { AnyFilesInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
+import 'multer';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -233,5 +235,76 @@ export class HrWebController {
       meta: result.meta
     };
   }
+
+  @Get('employees/:id')
+  @UseGuards(JwtAuthGuard)
+  async getEmployee(@Param('id') employeeId: string) {
+    const employee = await this.employeeService.getEmployeeById(employeeId);
+
+    return {
+      success: true,
+      message: 'Employee fetched successfully',
+      data: employee
+    };
+  }
+
+  @Get('employees/leadership')
+  @UseGuards(JwtAuthGuard)
+  async getLeadership() {
+    const leadership = await this.employeeService.getLeadership();
+
+    return {
+      success: true,
+      message: 'Leadership fetched successfully',
+      data: leadership
+    };
+  }
+
+  @Get('employees/new-code')
+  @UseGuards(JwtAuthGuard)
+  async getNewEmployeeCode() {
+    const newCode = await this.employeeService.generateNewEmployeeCode();
+
+    return {
+      success: true,
+      message: 'New employee code generated successfully',
+      data: newCode
+    };
+  }
+
+  @Post('employees/create')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'experienceCertificate', maxCount: 1 },
+      { name: 'twelfthMarksheet', maxCount: 1 },
+      { name: 'tenthMarksheet', maxCount: 1 },
+      { name: 'graduationMarksheet', maxCount: 1 },
+      { name: 'postGraduationMarksheet', maxCount: 1 },
+      { name: 'aadhaarFile', maxCount: 1 },
+      { name: 'panFile', maxCount: 1 },
+      { name: 'passbookFile', maxCount: 1 },
+      { name: 'medicalDocument', maxCount: 1 },
+    ]),
+  )
+  async createNewEmployee(
+    @Body() employeeData: any,
+    @UploadedFiles() files: {
+      profileImage?: Express.Multer.File[];
+      experienceCertificate?: Express.Multer.File[];
+      twelfthMarksheet?: Express.Multer.File[];
+      tenthMarksheet?: Express.Multer.File[];
+      graduationMarksheet?: Express.Multer.File[];
+      postGraduationMarksheet?: Express.Multer.File[];
+      aadhaarFile?: Express.Multer.File[];
+      panFile?: Express.Multer.File[];
+      passbookFile?: Express.Multer.File[];
+      medicalDocument?: Express.Multer.File[];
+    },
+  ) {
+    return this.employeeService.createEmployeeProfile(employeeData, files);
+  }
+
 
 }

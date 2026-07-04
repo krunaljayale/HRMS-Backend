@@ -15,6 +15,36 @@ export const POSITIONS = [
     'HR Executive', 'System Administrator'
 ];
 
+
+// ── SUB-SCHEMA FOR SINGLE ADDRESS STRUCTURE ──
+@Schema({ _id: false })
+export class AddressDetails {
+    @Prop({ required: true, trim: true })
+    address!: string;
+
+    @Prop({ required: true, trim: true })
+    pinCode!: string; // Lowercase 'c' issue solved globally
+
+    @Prop({ required: true, trim: true })
+    state!: string;
+
+    @Prop({ required: true, trim: true })
+    district!: string;
+
+    @Prop({ required: true, trim: true })
+    city!: string;
+}
+
+// ── SUB-SCHEMA FOR NESTED DUAL ADDRESS RESIDENCY ──
+@Schema({ _id: false })
+export class MultiResidencyAddress {
+    @Prop({ type: AddressDetails, required: true })
+    current!: AddressDetails;
+
+    @Prop({ type: AddressDetails, required: true })
+    permanent!: AddressDetails;
+}
+
 @Schema({ timestamps: true })
 export class Employee extends Document {
     // ── EMPLOYEE CODE ──
@@ -25,7 +55,7 @@ export class Employee extends Document {
     password!: string;
 
     // ── ACCOUNT ACCESS LEVEL ──
-    @Prop({ required: true, enum: ['Employee'], default: 'Employee' })
+    @Prop({ required: true, enum: ['Employee', 'Intern'], default: 'Employee' })
     role!: string;
 
     // ── TECHNICAL SYSTEM PRIVILEGES ──
@@ -76,6 +106,9 @@ export class Employee extends Document {
     @Prop({ trim: true })
     motherName?: string;
 
+    @Prop({ type: MultiResidencyAddress, required: true })
+    address!: MultiResidencyAddress;
+
     @Prop()
     currentAddress?: string;
 
@@ -106,6 +139,9 @@ export class Employee extends Document {
 
     @Prop()
     salary?: number;
+
+    @Prop({ required: true, type: Number, min: 0, default: 0 })
+    fixedAllowance!: number;
 
     // ── PAYROLL POLICY ──
     @Prop({

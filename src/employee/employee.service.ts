@@ -6,11 +6,13 @@ import * as bcrypt from 'bcrypt';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class EmployeeService {
     constructor(
         @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
+        private readonly cloudinaryService: CloudinaryService,
     ) { }
 
     async validatePassword(employeeCode: string, plainTextPass: string): Promise<any> {
@@ -411,5 +413,109 @@ export class EmployeeService {
                 limit
             }
         };
+    }
+
+    async getLeadership(): Promise<{ _id: string; name: string; employeeCode: string }[]> {
+        const managers = await this.employeeModel.find({ isLeadershipRole: true, status: 'Active' })
+            .select('name employeeCode')
+            .sort({ employeeCode: 1 })
+            .lean();
+
+        return managers.map(manager => ({
+            _id: manager._id.toString(),
+            name: manager.name,
+            employeeCode: manager.employeeCode
+        }));
+    }
+
+    async generateNewEmployeeCode(): Promise<string> {
+        // 1. Find the employee with the highest employeeCode, excluding the Play Store account
+        const lastEmployee = await this.employeeModel
+            .findOne({
+                employeeCode: {
+                    $regex: /^IA\d{5}$/,
+                    $ne: 'IA11111' // Exclude the Play Store account from the sequence calculation
+                }
+            })
+            .sort({ employeeCode: -1 }) // Sort descending to get the highest legitimate code
+            .select('employeeCode')
+            .lean();
+
+        // 2. Fallback to 1 if no employee exists yet
+        let nextNumericId = 1;
+
+        if (lastEmployee && lastEmployee.employeeCode) {
+            // Extract the numeric part (e.g., "IA00141" -> "00141")
+            const numericPart = lastEmployee.employeeCode.replace('IA', '');
+
+            // Parse it to a number, then increment it by 1
+            nextNumericId = parseInt(numericPart, 10) + 1;
+        }
+
+        // 3. Format back to "IA" followed by 5 digits padded with leading zeros
+        const newEmployeeCode = `IA${String(nextNumericId).padStart(5, '0')}`;
+
+        return newEmployeeCode;
+    }
+
+    async createEmployeeProfile(rawData: any, files: Record<string, Express.Multer.File[]>) {
+        const uploadedUrls: Record<string, string> = {};
+
+        // 1. Process files uploading to Cloudinary concurrently
+        if (files && Object.keys(files).length > 0) {
+            const uploadPromises = Object.keys(files).map(async (fieldKey) => {
+                const fileArray = files[fieldKey];
+                if (fileArray && fileArray[0]) {
+                    try {
+                        const uploadResult = await this.cloudinaryService.uploadFile(
+                            fileArray[0],
+                            `new_hrms_employees_data/${rawData.employeeCode || 'unassigned'}`
+                        );
+                        uploadedUrls[fieldKey] = uploadResult.secure_url;
+                    } catch (error) {
+                        console.error(`Failed to upload ${fieldKey} to Cloudinary:`, error);
+                        throw new BadRequestException(`File upload failed for ${fieldKey}`);
+                    }
+                }
+            });
+
+            await Promise.all(uploadPromises);
+        }
+
+        // 2. Typecast multi-part form strings back to native JS types safely
+        const sanitizedData = {
+            ...rawData,
+            isAppAdmin: rawData.isAppAdmin === 'true',
+            isLeadershipRole: rawData.isLeadershipRole === 'true',
+            salary: rawData.salary ? Number(rawData.salary) : 0,
+            fixedAllowance: rawData.fixedAllowance ? Number(rawData.fixedAllowance) : 0,
+            totalExperienceYears: rawData.totalExperienceYears ? Number(rawData.totalExperienceYears) : 0,
+            hscPercent: rawData.hscPercent ? Number(rawData.hscPercent) : 0,
+            graduationPercent: rawData.graduationPercent ? Number(rawData.graduationPercent) : 0,
+            postGraduationPercent: rawData.postGraduationPercent ? Number(rawData.postGraduationPercent) : 0,
+            diseaseSince: rawData.diseaseSince ? Number(rawData.diseaseSince) : undefined,
+
+            // 3. Attach file URLs directly onto the data structure maps
+            profileImageUrl: uploadedUrls.profileImage || null,
+            documents: {
+                experienceCertificate: uploadedUrls.experienceCertificate || null,
+                twelfthMarksheet: uploadedUrls.twelfthMarksheet || null,
+                tenthMarksheet: uploadedUrls.tenthMarksheet || null,
+                graduationMarksheet: uploadedUrls.graduationMarksheet || null,
+                postGraduationMarksheet: uploadedUrls.postGraduationMarksheet || null,
+                aadhaarFile: uploadedUrls.aadhaarFile || null,
+                panFile: uploadedUrls.panFile || null,
+                passbookFile: uploadedUrls.passbookFile || null,
+                medicalDocument: uploadedUrls.medicalDocument || null,
+            }
+        };
+
+        // console.log('Final Entity Ready for DB persistence:', sanitizedData);
+
+        // 4. Save to database
+        const newEmployee = new this.employeeModel(sanitizedData);
+        return await newEmployee.save();
+
+        // return { success: true, data: sanitizedData };
     }
 }

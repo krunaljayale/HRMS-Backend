@@ -449,7 +449,9 @@ export class LeaveService {
                 $facet: {
                     metadata: [{ $count: 'totalRecords' }],
                     data: [
-                        { $sort: { createdAt: -1 } }, // Newest first
+                        // CHANGE THIS LINE: 
+                        // Instead of { $sort: { createdAt: -1 } }, use:
+                        { $sort: { startDate: -1 } }, 
                         { $skip: skip },
                         { $limit: Number(limit) },
                         {

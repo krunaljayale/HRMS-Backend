@@ -16,6 +16,7 @@ import { SystemConfigModule } from './system-config/system-config.module';
 import { ResignationModule } from './resignation/resignation.module';
 import { HrModule } from './hr/hr.module';
 import { NotificationsModule } from './notification/notification.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -59,6 +60,8 @@ import { NotificationsModule } from './notification/notification.module';
     HrModule,
 
     NotificationsModule,
+
+    CloudinaryModule,
   ],
   controllers: [AppController],
   providers: [AppService],

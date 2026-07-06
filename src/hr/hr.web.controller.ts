@@ -1,10 +1,28 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { HrService } from './hr.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AttendanceService } from '../attendance/attendance.service';
 import { EmployeeService } from '../employee/employee.service';
 import { LeaveService } from '../leave/leave.service';
-import { AnyFilesInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
+import {
+  AnyFilesInterceptor,
+  FileFieldsInterceptor,
+} from '@nestjs/platform-express';
 import 'multer';
 
 @Controller('api/web/hr')
@@ -14,7 +32,7 @@ export class HrWebController {
     private readonly attendanceService: AttendanceService,
     private readonly employeeService: EmployeeService,
     private readonly leaveService: LeaveService,
-  ) { }
+  ) {}
 
   @Get('get-general-stats')
   @HttpCode(HttpStatus.OK)
@@ -29,7 +47,9 @@ export class HrWebController {
   async getAverageAttendanceStats(@Query('type') type: string) {
     // 1. Validate query parameters strictly before querying the DB
     if (!type || (type !== 'monthly' && type !== 'yearly')) {
-      throw new BadRequestException('Query parameter "type" must be either "monthly" or "yearly"');
+      throw new BadRequestException(
+        'Query parameter "type" must be either "monthly" or "yearly"',
+      );
     }
 
     // 2. Delegate data aggregation to the service layer
@@ -75,7 +95,7 @@ export class HrWebController {
     return {
       success: true,
       message: 'Live roster fetched successfully',
-      data: data
+      data: data,
     };
   }
 
@@ -88,8 +108,8 @@ export class HrWebController {
       success: true,
       message: 'Pending corrections count fetched successfully',
       data: {
-        count: count
-      }
+        count: count,
+      },
     };
   }
 
@@ -101,7 +121,7 @@ export class HrWebController {
     return {
       success: true,
       message: 'Pending corrections fetched successfully',
-      data: data
+      data: data,
     };
   }
 
@@ -138,14 +158,20 @@ export class HrWebController {
     @Query('status') status?: string,
   ) {
     const result = await this.attendanceService.getHistoricalLedger({
-      page, limit, search, department, startDate, endDate, status
+      page,
+      limit,
+      search,
+      department,
+      startDate,
+      endDate,
+      status,
     });
 
     return {
       success: true,
       message: 'Historical ledger fetched successfully',
       data: result.data,
-      meta: result.meta
+      meta: result.meta,
     };
   }
 
@@ -179,7 +205,7 @@ export class HrWebController {
   async rejectLeave(
     @Param('id') leaveId: string,
     @Body('remarks') remarks: string,
-    @Req() req: any
+    @Req() req: any,
   ) {
     // req.user.employeeId represents the logged-in HR Admin's ID
     const hrAdminId = req.user.employeeId;
@@ -204,14 +230,20 @@ export class HrWebController {
     @Query('status') status?: string,
   ) {
     const result = await this.leaveService.getHistoricalLeaves({
-      page, limit, search, department, startDate, endDate, status
+      page,
+      limit,
+      search,
+      department,
+      startDate,
+      endDate,
+      status,
     });
 
     return {
       success: true,
       message: 'Historical leaves fetched successfully',
       data: result.data,
-      meta: result.meta
+      meta: result.meta,
     };
   }
 
@@ -225,26 +257,18 @@ export class HrWebController {
     @Query('limit') limit: number = 10,
   ) {
     const result = await this.employeeService.getAllEmployeesForHR(
-      search, department, status, Number(page), Number(limit)
+      search,
+      department,
+      status,
+      Number(page),
+      Number(limit),
     );
 
     return {
       success: true,
       message: 'Employees fetched successfully',
       data: result.data,
-      meta: result.meta
-    };
-  }
-
-  @Get('employees/:id')
-  @UseGuards(JwtAuthGuard)
-  async getEmployee(@Param('id') employeeId: string) {
-    const employee = await this.employeeService.getEmployeeById(employeeId);
-
-    return {
-      success: true,
-      message: 'Employee fetched successfully',
-      data: employee
+      meta: result.meta,
     };
   }
 
@@ -256,7 +280,7 @@ export class HrWebController {
     return {
       success: true,
       message: 'Leadership fetched successfully',
-      data: leadership
+      data: leadership,
     };
   }
 
@@ -268,7 +292,7 @@ export class HrWebController {
     return {
       success: true,
       message: 'New employee code generated successfully',
-      data: newCode
+      data: newCode,
     };
   }
 
@@ -290,7 +314,8 @@ export class HrWebController {
   )
   async createNewEmployee(
     @Body() employeeData: any,
-    @UploadedFiles() files: {
+    @UploadedFiles()
+    files: {
       profileImage?: Express.Multer.File[];
       experienceCertificate?: Express.Multer.File[];
       twelfthMarksheet?: Express.Multer.File[];
@@ -306,5 +331,15 @@ export class HrWebController {
     return this.employeeService.createEmployeeProfile(employeeData, files);
   }
 
+  @Get('employees/:id')
+  @UseGuards(JwtAuthGuard)
+  async getEmployee(@Param('id') employeeId: string) {
+    const employee = await this.employeeService.getEmployeeById(employeeId);
 
+    return {
+      success: true,
+      message: 'Employee fetched successfully',
+      data: employee,
+    };
+  }
 }

@@ -6,6 +6,7 @@ import { HrProfile, HrProfileSchema } from './schemas/hr-profile.schema';
 import { EmployeeModule } from '../employee/employee.module';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { LeaveModule } from '../leave/leave.module';
+import { PayrollModule } from '../payroll/payroll.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { LeaveModule } from '../leave/leave.module';
     EmployeeModule,
     AttendanceModule,
     LeaveModule,
+    PayrollModule,
   ],
   controllers: [HrWebController],
   providers: [HrService],

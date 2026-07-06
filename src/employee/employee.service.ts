@@ -113,6 +113,15 @@ export class EmployeeService {
     return employee;
   }
 
+  // ─── FETCH ONLY ACTIVE EMPLOYEES (Optional Helper) ───────────
+  /**
+   * A cleaner alternative if you prefer not to pass the filter object
+   * directly from the payroll service.
+   */
+  async getActiveEmployees(): Promise<EmployeeDocument[]> {
+    return await this.employeeModel.find({ status: 'Active' }).exec();
+  }
+
   // ── UPDATE FCM TOKEN ──
   async updateFcmToken(
     employeeId: string,
@@ -517,20 +526,32 @@ export class EmployeeService {
 
     // 1. Process files sequentially to prevent Cloudinary payload bottlenecks
     if (files && Object.keys(files).length > 0) {
-      for (const fieldKey of Object.keys(files)) {
-        const fileArray = files[fieldKey];
-        if (fileArray && fileArray[0]) {
-          try {
-            const uploadResult = await this.cloudinaryService.uploadFile(
-              fileArray[0],
-              `new_hrms_employees_data/${rawData.employeeCode || 'unassigned'}`,
-            );
-            uploadedUrls[fieldKey] = uploadResult.secure_url;
-          } catch (error) {
-            console.error(`Failed to upload ${fieldKey} to Cloudinary:`, error);
-            throw new BadRequestException(`File upload failed for ${fieldKey}`);
-          }
-        }
+      const fileKeys = Object.keys(files);
+      const chunkSize = 3; // Upload 3 files at exactly the same time
+
+      for (let i = 0; i < fileKeys.length; i += chunkSize) {
+        const chunk = fileKeys.slice(i, i + chunkSize);
+
+        // Process chunk in parallel
+        await Promise.all(
+          chunk.map(async (fieldKey) => {
+            const fileArray = files[fieldKey];
+            if (fileArray && fileArray[0]) {
+              try {
+                const uploadResult = await this.cloudinaryService.uploadFile(
+                  fileArray[0],
+                  `new_hrms_employees_data/${rawData.employeeCode || 'unassigned'}`,
+                );
+                uploadedUrls[fieldKey] = uploadResult.secure_url;
+              } catch (error) {
+                console.error(`Failed to upload ${fieldKey}:`, error);
+                throw new BadRequestException(
+                  `File upload failed for ${fieldKey}`,
+                );
+              }
+            }
+          }),
+        );
       }
     }
 
@@ -618,7 +639,7 @@ export class EmployeeService {
       (key) => sanitizedData[key] === undefined && delete sanitizedData[key],
     );
 
-    console.log('Pushing to Mongoose Engine Context Layer:', sanitizedData);
+    // console.log('Pushing to Mongoose Engine Context Layer:', sanitizedData);
 
     // 5. Instantiation and database execution save block
     try {

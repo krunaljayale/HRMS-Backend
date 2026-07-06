@@ -20,10 +20,11 @@ import { AttendanceService } from '../attendance/attendance.service';
 import { EmployeeService } from '../employee/employee.service';
 import { LeaveService } from '../leave/leave.service';
 import {
-  AnyFilesInterceptor,
   FileFieldsInterceptor,
 } from '@nestjs/platform-express';
 import 'multer';
+import { GetPayrollListQueryDto } from '../payroll/dto/get-payroll-list.dto';
+import { PayrollService } from '../payroll/payroll.service';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -32,6 +33,7 @@ export class HrWebController {
     private readonly attendanceService: AttendanceService,
     private readonly employeeService: EmployeeService,
     private readonly leaveService: LeaveService,
+    private readonly payrollService:PayrollService,
   ) {}
 
   @Get('get-general-stats')
@@ -330,6 +332,16 @@ export class HrWebController {
   ) {
     return this.employeeService.createEmployeeProfile(employeeData, files);
   }
+
+  @Get('employee/payrollList')
+    async getPayrollList(
+        @Req() req: any, 
+        @Query() queryDto: GetPayrollListQueryDto
+    ) {
+        // req.user is populated by your AuthGuard
+        return await this.payrollService.getPayrollList(req.user, queryDto);
+    }
+
 
   @Get('employees/:id')
   @UseGuards(JwtAuthGuard)

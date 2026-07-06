@@ -18,5 +18,6 @@ import { HolidayModule } from '../holiday/holiday.module';
   ],
   controllers: [PayrollAppController],
   providers: [PayrollService],
+  exports: [PayrollService],
 })
-export class PayrollModule { }
+export class PayrollModule {}

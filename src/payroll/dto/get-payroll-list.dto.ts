@@ -1,29 +1,14 @@
 import {
   IsOptional,
   IsString,
-  IsEnum,
   IsBooleanString,
-  IsInt,
-  Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export class GetPayrollListQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  month?: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(2000)
-  year?: number;
-
-  @IsOptional()
-  @IsEnum(['Draft', 'Processed', 'Paid'])
-  status?: string;
+  @IsString()
+  search?: string;
 
   @IsOptional()
   @IsString()
@@ -36,6 +21,10 @@ export class GetPayrollListQueryDto {
   @IsOptional()
   @IsString()
   employeeId?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @IsBooleanString()

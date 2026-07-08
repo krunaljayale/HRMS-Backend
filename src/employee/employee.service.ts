@@ -18,7 +18,7 @@ export class EmployeeService {
   constructor(
     @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
     private readonly cloudinaryService: CloudinaryService,
-  ) {}
+  ) { }
 
   async validatePassword(
     employeeCode: string,
@@ -587,18 +587,20 @@ export class EmployeeService {
         rawData.isLeadershipRole === 'true' ||
         rawData.isLeadershipRole === true,
 
-      // Prevent NaN allocations inside numeric parameters
-      salary:
-        rawData.salary && !isNaN(Number(rawData.salary))
-          ? Number(rawData.salary)
-          : undefined,
-      fixedAllowance:
-        rawData.fixedAllowance && !isNaN(Number(rawData.fixedAllowance))
-          ? Number(rawData.fixedAllowance)
-          : 0,
+      // Strictly parse as numbers and fallback to 0
+      salary: rawData.salary && !isNaN(Number(rawData.salary))
+        ? Number(rawData.salary)
+        : 0,
+      fixedAllowance: rawData.fixedAllowance && !isNaN(Number(rawData.fixedAllowance))
+        ? Number(rawData.fixedAllowance)
+        : 0,
+
+      // Explicitly remove legacy salaryStructure if the frontend still sends it
+      salaryStructure: undefined,
+
       totalExperienceYears:
         rawData.totalExperienceYears &&
-        !isNaN(Number(rawData.totalExperienceYears))
+          !isNaN(Number(rawData.totalExperienceYears))
           ? Number(rawData.totalExperienceYears)
           : undefined,
       hscPercent:
@@ -611,7 +613,7 @@ export class EmployeeService {
           : undefined,
       postGraduationPercent:
         rawData.postGraduationPercent &&
-        !isNaN(Number(rawData.postGraduationPercent))
+          !isNaN(Number(rawData.postGraduationPercent))
           ? Number(rawData.postGraduationPercent)
           : undefined,
 

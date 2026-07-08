@@ -137,21 +137,13 @@ export class Employee extends Document {
     @Prop({ type: Boolean, default: false })
     isLeadershipRole!: boolean;
 
-    @Prop()
-    salary?: number;
+    // This now represents the absolute Fixed Basic Salary
+    @Prop({ required: true, type: Number, min: 0, default: 0 })
+    salary!: number;
 
+    // This represents the absolute Fixed Allowance
     @Prop({ required: true, type: Number, min: 0, default: 0 })
     fixedAllowance!: number;
-
-    // ── PAYROLL POLICY ──
-    @Prop({
-        type: {
-            basicPercentage: { type: Number, default: 100 },
-            allowancePercentage: { type: Number, default: 0 }
-        },
-        default: { basicPercentage: 100, allowancePercentage: 0 }
-    })
-    salaryStructure!: { basicPercentage: number; allowancePercentage: number };
 
     // ── DIRECT REPORTING SUPERVISOR ──
     @Prop({ type: Types.ObjectId, ref: 'Employee', index: true })

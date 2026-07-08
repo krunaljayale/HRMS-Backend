@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
+  InternalServerErrorException,
   Param,
   Patch,
   Post,
@@ -25,6 +27,7 @@ import {
 import 'multer';
 import { GetPayrollListQueryDto } from '../payroll/dto/get-payroll-list.dto';
 import { PayrollService } from '../payroll/payroll.service';
+import { ProcessAllActivePayrollDto } from '../payroll/dto/process-all-active-payroll.dto';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -33,8 +36,8 @@ export class HrWebController {
     private readonly attendanceService: AttendanceService,
     private readonly employeeService: EmployeeService,
     private readonly leaveService: LeaveService,
-    private readonly payrollService:PayrollService,
-  ) {}
+    private readonly payrollService: PayrollService,
+  ) { }
 
   @Get('get-general-stats')
   @HttpCode(HttpStatus.OK)
@@ -333,16 +336,6 @@ export class HrWebController {
     return this.employeeService.createEmployeeProfile(employeeData, files);
   }
 
-  @Get('employee/payrollList')
-    async getPayrollList(
-        @Req() req: any, 
-        @Query() queryDto: GetPayrollListQueryDto
-    ) {
-        // req.user is populated by your AuthGuard
-        return await this.payrollService.getPayrollList(req.user, queryDto);
-    }
-
-
   @Get('employees/:id')
   @UseGuards(JwtAuthGuard)
   async getEmployee(@Param('id') employeeId: string) {
@@ -354,4 +347,46 @@ export class HrWebController {
       data: employee,
     };
   }
+
+  // ─── 1. STATIC PATHS GO FIRST ───
+  @Get('payroll/payrollList')
+  @UseGuards(JwtAuthGuard)
+  async getPayrollList(
+    @Req() req: any,
+    @Query() queryDto: GetPayrollListQueryDto
+  ) {
+    return await this.payrollService.getPayrollList(req.user, queryDto);
+  }
+
+  @Post('payroll/process-all-active')
+  @UseGuards(JwtAuthGuard)
+  async processAllActive(
+    @Req() req: any,
+    @Body() body: ProcessAllActivePayrollDto
+  ) {
+
+    // 1. Parse and Validate Dates
+    const fromDate = new Date(body.fromDate);
+    const toDate = new Date(body.toDate);
+
+    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+      throw new BadRequestException('Invalid date format provided.');
+    }
+
+    if (fromDate > toDate) {
+      throw new BadRequestException('fromDate cannot be after toDate.');
+    }
+
+    // 2. Trigger the Batch Engine
+    return await this.payrollService.generateAllEmployeesPayroll(
+      fromDate,
+      toDate,
+      body.targetMonth,
+      body.targetYear,
+      req.user.employeeId 
+    );
+  }
+
+
+
 }

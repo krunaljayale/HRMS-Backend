@@ -28,7 +28,7 @@ export class PayrollService {
     private readonly attendanceService: AttendanceService,
     private readonly leaveService: LeaveService,
     private readonly holidayService: HolidayService,
-  ) {}
+  ) { }
 
   // ── CORE ENGINE: SHARED PAYROLL CALCULATOR ──
   private async calculatePayrollMetrics(
@@ -37,28 +37,10 @@ export class PayrollService {
     fromDate: Date,
     toDate: Date,
   ) {
-    // 1. The denominator for salary math MUST remain the total days in the actual cycle
     const totalCycleDays =
       Math.floor(
         (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24),
       ) + 1;
-
-    // Fetch Data Concurrently
-    const [attendances, holidays, approvedLeaves] = await Promise.all([
-      this.attendanceService.findRecordsInRange(employeeId, fromDate, toDate),
-      this.holidayService.findHolidaysInRange(fromDate, toDate),
-      this.leaveService.findApprovedLeavesInRange(employeeId, fromDate, toDate),
-    ]);
-
-    let present = 0,
-      half = 0,
-      absent = 0,
-      paidLeaveCount = 0,
-      holidayCount = 0,
-      weekOffCount = 0,
-      compOffCount = 0;
-    const paidDaysBreakdown: { date: string; type: string; value: number }[] =
-      [];
 
     // Calculate Effective Start Date (Joining Date Logic)
     const cycleStartDate = new Date(fromDate);
@@ -69,13 +51,42 @@ export class PayrollService {
     const effectiveStartDate =
       joiningDate > cycleStartDate ? joiningDate : cycleStartDate;
 
-    // --- PHASE 1: BUILD THE TIMELINE ---
-    const timeline: { date: string; status: string; isFreeDay: boolean }[] = [];
-    let scheduledFreeDays = 0; // Tracks absolute free days to keep workingDays math stable
-    let current = new Date(effectiveStartDate);
+    // ─── THE FIX: ADD A 4-DAY BUFFER TO CHECK EDGE-CASE SANDWICHES ───
+    const bufferFrom = new Date(effectiveStartDate);
+    bufferFrom.setDate(bufferFrom.getDate() - 4);
 
-    while (current <= toDate) {
-      // Generate the YYYY-MM-DD string strictly in IST to match your new schema
+    const bufferTo = new Date(toDate);
+    bufferTo.setDate(bufferTo.getDate() + 4);
+
+    // Fetch Data Concurrently using the BUFFERS
+    const [attendances, holidays, approvedLeaves] = await Promise.all([
+      this.attendanceService.findRecordsInRange(employeeId, bufferFrom, bufferTo),
+      this.holidayService.findHolidaysInRange(bufferFrom, bufferTo),
+      this.leaveService.findApprovedLeavesInRange(employeeId, bufferFrom, bufferTo),
+    ]);
+
+    let present = 0,
+      half = 0,
+      absent = 0,
+      paidLeaveCount = 0,
+      holidayCount = 0,
+      weekOffCount = 0,
+      compOffCount = 0;
+    const paidDaysBreakdown: { date: string; type: string; value: number }[] = [];
+
+    const cycleFromStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(effectiveStartDate);
+    const cycleToStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(toDate);
+
+    // --- PHASE 1: BUILD THE TIMELINE (Including Buffers) ---
+    const timeline: { date: string; status: string; isFreeDay: boolean }[] = [];
+    let scheduledFreeDays = 0;
+    let current = new Date(bufferFrom);
+
+    while (current <= bufferTo) {
       const dStr = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Kolkata',
         year: 'numeric',
@@ -89,7 +100,6 @@ export class PayrollService {
           weekday: 'short',
         }).format(current) === 'Sun';
 
-      // 🛡️ HOLIDAY TIMEZONE FIX: Convert MongoDB Date to IST string before comparing
       const isHolid = holidays.some((h) => {
         const hDate = h.date instanceof Date ? h.date : new Date(h.date);
         const hStr = new Intl.DateTimeFormat('en-CA', {
@@ -101,10 +111,8 @@ export class PayrollService {
         return hStr === dStr;
       });
 
-      // Exact string match based on your new schema
       const record = attendances.find((a) => a.date === dStr);
 
-      // LEAVE SCHEDULER: Also formatted to IST strings for safe comparison
       const leaveRecord = approvedLeaves.find((l) => {
         const startStr = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'Asia/Kolkata',
@@ -129,47 +137,36 @@ export class PayrollService {
       if (isSunday) {
         dayStatus = 'WeekOff';
         isFreeDay = true;
-        scheduledFreeDays++;
       } else if (isHolid) {
         dayStatus = 'Holiday';
         isFreeDay = true;
-        scheduledFreeDays++;
       } else {
-        // 1. Physically Worked (Full Day)
         if (record && record.status === 'P') {
           dayStatus = 'Present';
-        }
-        // 2. Physically Worked (Half Day)
-        else if (record && record.status === 'Half') {
-          // 🛡️ SCHEMA FIX: Using leaveCategory instead of leaveType
+        } else if (record && record.status === 'Half') {
           if (leaveRecord && leaveRecord.leaveCategory === 'Paid') {
             dayStatus = 'HalfPresent_HalfPaidLeave';
           } else {
             dayStatus = 'HalfDay';
           }
-        }
-        // 3. Compensatory Offs
-        else if (record && record.status === 'CompOff') {
+        } else if (record && record.status === 'CompOff') {
           dayStatus = 'CompOff';
         } else if (record && record.status === 'HalfCompOff') {
           dayStatus = 'HalfCompOff';
-        }
-        // 4. No physical presence -> Check Leave Schema strictly for 'Paid'
-        else if (leaveRecord) {
-          // 🛡️ STRICT PAID LEAVE RULE: Only 'Paid' category generates pay
+        } else if (leaveRecord) {
           if (leaveRecord.leaveCategory === 'Paid') {
-            // If they are not physically present, but have a half-day paid leave ticket, they lose the other half
-            dayStatus = leaveRecord.isHalfDay
-              ? 'HalfPaidLeave_HalfAbsent'
-              : 'PaidLeave';
+            dayStatus = leaveRecord.isHalfDay ? 'HalfPaidLeave_HalfAbsent' : 'PaidLeave';
           } else {
-            dayStatus = 'Absent'; // Unpaid, Sick, Casual, Other without physical presence = Absent
+            dayStatus = 'Absent';
           }
-        }
-        // 5. No physical presence, no leave ticket (Record might be 'A', 'L', 'AUTO', or undefined)
-        else {
+        } else {
           dayStatus = 'Absent';
         }
+      }
+
+      // Only count scheduled free days if they fall strictly within the active pay cycle
+      if (isFreeDay && dStr >= cycleFromStr && dStr <= cycleToStr) {
+        scheduledFreeDays++;
       }
 
       timeline.push({ date: dStr, status: dayStatus, isFreeDay });
@@ -177,8 +174,6 @@ export class PayrollService {
     }
 
     // --- PHASE 2: THE SANDWICH SCANNER ---
-    // Rule: ONLY full days of non-presence can build a bridge.
-    // Any status representing physical presence (HalfDay, HalfCompOff, Present, HalfPresent_HalfPaidLeave) is EXCLUDED.
     const bridgeBuilders = [
       'Absent',
       'PaidLeave',
@@ -211,7 +206,6 @@ export class PayrollService {
           }
         }
 
-        // Penalize the free day ONLY if fully sandwiched
         if (leftBuilder && rightBuilder) {
           timeline[i].status = 'Sandwiched';
         }
@@ -220,6 +214,10 @@ export class PayrollService {
 
     // --- PHASE 3: TALLY THE RESULTS ---
     for (const day of timeline) {
+      if (day.date < cycleFromStr || day.date > cycleToStr) {
+        continue;
+      }
+
       if (day.status === 'Present') {
         present++;
         paidDaysBreakdown.push({ date: day.date, type: 'Present', value: 1 });
@@ -231,12 +229,8 @@ export class PayrollService {
         paidDaysBreakdown.push({ date: day.date, type: 'CompOff', value: 1 });
       } else if (day.status === 'HalfCompOff') {
         compOffCount += 0.5;
-        half++; // The other half was worked
-        paidDaysBreakdown.push({
-          date: day.date,
-          type: 'HalfCompOff',
-          value: 0.5,
-        });
+        half++;
+        paidDaysBreakdown.push({ date: day.date, type: 'HalfCompOff', value: 0.5 });
         paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
       } else if (day.status === 'PaidLeave') {
         paidLeaveCount++;
@@ -247,31 +241,22 @@ export class PayrollService {
       } else if (day.status === 'Holiday') {
         holidayCount++;
         paidDaysBreakdown.push({ date: day.date, type: 'Holiday', value: 1 });
-      }
-      // ── SPLIT COLLISIONS FOR FRONTEND ACCURACY ──
-      else if (day.status === 'HalfPresent_HalfPaidLeave') {
+      } else if (day.status === 'HalfPresent_HalfPaidLeave') {
         half++;
         paidLeaveCount += 0.5;
         paidDaysBreakdown.push({ date: day.date, type: 'HalfDay', value: 0.5 });
-        paidDaysBreakdown.push({
-          date: day.date,
-          type: 'PaidLeave',
-          value: 0.5,
-        });
+        paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
       } else if (day.status === 'HalfPaidLeave_HalfAbsent') {
         paidLeaveCount += 0.5;
         absent += 0.5;
-        paidDaysBreakdown.push({
-          date: day.date,
-          type: 'PaidLeave',
-          value: 0.5,
-        });
+        paidDaysBreakdown.push({ date: day.date, type: 'PaidLeave', value: 0.5 });
       } else if (day.status === 'Absent' || day.status === 'Sandwiched') {
         absent++;
+        paidDaysBreakdown.push({ date: day.date, type: day.status, value: 0 });
       }
     }
 
-    // --- PHASE 4: APPLY MATH ---
+    // --- PHASE 4: APPLY MATH (Updated for Tax Strategy) ---
     const paidDays =
       present +
       compOffCount +
@@ -279,29 +264,25 @@ export class PayrollService {
       paidLeaveCount +
       weekOffCount +
       holidayCount;
-    const leavesTaken = absent + half * 0.5; // Includes full absent days, half deductions, and sandwich deductions
+    const leavesTaken = absent + half * 0.5;
 
-    const totalCTC = employee.salary || 0;
-    const structure = employee.salaryStructure || {
-      basicPercentage: 100,
-      allowancePercentage: 0,
-    };
+    const basic = employee.salary || 0;
 
-    // Assumes these helpers are defined elsewhere in your class/file
-    const { basic, allowances } = calculateSalarySplit(totalCTC, structure);
+    // 1. Only Prorate the Basic Salary
     const pr_basic = calculateProratedAmount(basic, totalCycleDays, paidDays);
-    const pr_allowances = calculateProratedAmount(
-      allowances,
-      totalCycleDays,
-      paidDays,
-    );
-    const totalGross = pr_basic + pr_allowances;
 
+    // 2. Allowance remains a flat amount (not calculated per day)
+    const flat_allowance = employee.fixedAllowance || 0;
+
+    // 3. Calculate PT based STRICTLY on the raw 'basic' salary, ignoring the allowance entirely
     const professionalTax = calculatePT(
       basic,
       employee.gender,
       toDate.getUTCMonth(),
     );
+
+    // 4. Calculate Gross and Net
+    const totalGross = pr_basic + flat_allowance;
     const netSalary = Math.max(0, totalGross - professionalTax);
 
     return {
@@ -309,7 +290,7 @@ export class PayrollService {
       workingDays:
         Math.floor(
           (toDate.getTime() - effectiveStartDate.getTime()) /
-            (1000 * 60 * 60 * 24),
+          (1000 * 60 * 60 * 24),
         ) +
         1 -
         scheduledFreeDays,
@@ -325,8 +306,8 @@ export class PayrollService {
       paidDays,
       paidDaysBreakdown,
       earnings: {
-        basic: pr_basic,
-        allowances: pr_allowances,
+        basic: basic,
+        allowances: flat_allowance,
         totalGross: parseFloat(totalGross.toFixed(2)),
       },
       deductions: {
@@ -401,7 +382,7 @@ export class PayrollService {
         year: targetYear,
       },
       { $set: payload },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
   }
 
@@ -412,14 +393,10 @@ export class PayrollService {
     targetYear: number,
     processedById: string,
   ) {
-    // 1. Fetch all ACTIVE employees
-    // (Make sure you have a method like this in your EmployeeService)
     const employees = await this.employeeService.getActiveEmployees();
 
     if (!employees || employees.length === 0) {
-      throw new NotFoundException(
-        'No active employees found to process payroll.',
-      );
+      throw new NotFoundException('No active employees found to process payroll.');
     }
 
     const results = {
@@ -429,7 +406,8 @@ export class PayrollService {
       errors: [] as { employeeCode: string; error: string }[],
     };
 
-    // 2. Loop sequentially to protect DB limits and catch individual errors
+    // console.log(`[Payroll Batch] Starting batch process for ${employees.length} employees...`);
+
     for (const emp of employees) {
       try {
         await this.generateSingleEmployeePayroll(
@@ -442,24 +420,23 @@ export class PayrollService {
         );
         results.successful++;
       } catch (error: any) {
-        // If one employee fails, log it and continue to the next
         results.failed++;
         results.errors.push({
           employeeCode: emp.employeeCode,
           error: error.message || 'Unknown error occurred',
         });
+        console.error(`[Payroll Batch] Failed for ${emp.employeeCode}:`, error.message);
       }
       results.totalProcessed++;
     }
 
+    // console.log(`[Payroll Batch] Completed! Success: ${results.successful}, Failed: ${results.failed}`);
     return results;
   }
 
   async getPayrollList(user: any, queryDto: GetPayrollListQueryDto) {
     const {
-      month,
-      year,
-      status,
+      search,
       startDate,
       endDate,
       employeeId,
@@ -468,13 +445,19 @@ export class PayrollService {
       limit = '10',
     } = queryDto;
 
-    // 1. Permission Check based on Schema Flag
-    const isManagement = user.isLeadershipRole === true;
 
     const findQuery: any = {};
 
-    // 2. Role & Identity Scope Filter
-    if (self === 'true' || !isManagement) {
+    // 2. Text Search (Matches Name OR Code)
+    if (search) {
+      findQuery.$or = [
+        { employeeName: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    // 3. Role & Identity Scope Filter
+    if (self === 'true') {
       // Prioritize user.employeeId so it matches the ID stored in the payroll collection
       const targetId = user.employeeId || user.id || user._id;
       if (!Types.ObjectId.isValid(targetId)) {
@@ -489,7 +472,7 @@ export class PayrollService {
       findQuery.employeeId = new Types.ObjectId(employeeId);
     }
 
-    // 3. Date Scope Filters
+    // 4. Date Scope Filters
     if (startDate && endDate) {
       const start = new Date(`${startDate}T00:00:00Z`);
       const end = new Date(`${endDate}T23:59:59Z`);
@@ -497,19 +480,11 @@ export class PayrollService {
         findQuery.fromDate = { $lte: end };
         findQuery.toDate = { $gte: start };
       }
-    } else if (month && year) {
-      findQuery.month = Number(month);
-      findQuery.year = Number(year);
-    }
-
-    // 4. Status Filter (Draft, Processed, Paid)
-    if (status) {
-      findQuery.status = status;
     }
 
     // 5. Pagination Setup
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.max(1, parseInt(limit, 10));
+    const pageNum = Math.max(1, parseInt(page as string, 10));
+    const limitNum = Math.max(1, parseInt(limit as string, 10));
     const skip = (pageNum - 1) * limitNum;
 
     // 6. Query DB Concurrently
@@ -521,7 +496,7 @@ export class PayrollService {
           'name employeeCode department position joiningDate panNumber bankName accountNumber ifsc branch',
         )
         // Sort descending by creation date (newest payrolls first)
-        .sort({ createdAt: -1, employeeCode: 1 })
+        .sort({ employeeCode: 1 })
         .skip(skip)
         .limit(limitNum)
         .lean()

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { LeaveService } from './leave.service';
 import { LeaveAppController } from './leave.app.controller';
@@ -15,7 +15,7 @@ import { NotificationsModule } from '../notification/notification.module';
       { name: LeaveLedger.name, schema: LeaveLedgerSchema },
     ]),
 
-    EmployeeModule,
+    forwardRef(() => EmployeeModule),
     NotificationsModule,
   ],
   controllers: [LeaveAppController],

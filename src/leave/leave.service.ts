@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException, forwardRef, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { LeaveHistory, LeaveHistoryDocument } from './schemas/leave-history.schema';
@@ -13,7 +13,8 @@ export class LeaveService {
     constructor(
         @InjectModel(LeaveHistory.name) private leaveHistoryModel: Model<LeaveHistoryDocument>,
         @InjectModel(LeaveLedger.name) private leaveLedgerModel: Model<LeaveLedgerDocument>,
-        private employeeService: EmployeeService,
+        @Inject(forwardRef(() => EmployeeService))
+        private readonly employeeService: EmployeeService,
         private readonly notificationService: NotificationService,
     ) { }
 
@@ -38,7 +39,7 @@ export class LeaveService {
 
     // APPLICATION ENGINE (With Token Locking) ──
     async applyForLeave(applicantId: string, dto: any) {
-        const applicantInfo = await this.employeeService.getEmployeeById(applicantId, 'isLeadershipRole managerId');
+        const applicantInfo = await this.employeeService.getEmployeeById(applicantId, 'isLeadershipRole managerId name');
 
         if (!applicantInfo) throw new NotFoundException('Employee not found');
 
@@ -52,7 +53,7 @@ export class LeaveService {
             ? dto.consumedLedgerIds.map((id: string) => new Types.ObjectId(id))
             : [];
 
-        //  VERIFY TOKEN VALUES & LOCK THE TOKENS
+        // ── VERIFY TOKEN VALUES & LOCK THE TOKENS ──
         if (ledgerObjectIds.length > 0) {
 
             // 1. Fetch the actual tokens so we can read their fractional values
@@ -108,6 +109,26 @@ export class LeaveService {
             overallStatus: 'Pending',
             consumedLedgerIds: ledgerObjectIds
         });
+
+        // ── ASYNC FIREBASE PUSH NOTIFICATION TO MANAGER ──
+        if (applicantInfo.managerId) {
+            this.employeeService.getEmployeeById(applicantInfo.managerId.toString(), 'fcmToken name')
+                .then((manager) => {
+                    if (manager && manager.fcmToken) {
+                        this.notificationService.sendToEmployee({
+                            token: manager.fcmToken,
+                            title: "New Leave Approval Request 📋",
+                            body: `${applicantInfo.name} has submitted a ${dto.totalDays} day ${dto.leaveCategory} leave request requiring your approval.`,
+                            data: {
+                                type: "LEAVE_REQUEST_RECEIVED",
+                                leaveId: newLeave._id.toString(),
+                                status: "Pending"
+                            }
+                        }).catch(err => console.error("FCM Async Manager Error:", err));
+                    }
+                })
+                .catch(err => console.error("Failed to fetch manager for background notification:", err));
+        }
 
         return newLeave;
     }
@@ -451,7 +472,7 @@ export class LeaveService {
                     data: [
                         // CHANGE THIS LINE: 
                         // Instead of { $sort: { createdAt: -1 } }, use:
-                        { $sort: { startDate: -1 } }, 
+                        { $sort: { startDate: -1 } },
                         { $skip: skip },
                         { $limit: Number(limit) },
                         {
@@ -597,6 +618,209 @@ export class LeaveService {
             console.error('Database getTodayApprovedLeavesCount failure:', error);
             throw new InternalServerErrorException('Failed to calculate employees currently on leave');
         }
+    }
+
+    async countPendingApprovalsForManager(managerId: Types.ObjectId, reportIds: Types.ObjectId[]): Promise<number> {
+        return this.leaveHistoryModel.countDocuments({
+            employeeId: { $in: reportIds },
+            overallStatus: 'Pending',
+            $expr: {
+                $and: [
+                    { $lt: ['$currentStepIndex', { $size: '$workflowSteps' }] },
+                    {
+                        $eq: [
+                            { $arrayElemAt: ['$workflowSteps.approverId', '$currentStepIndex'] },
+                            managerId,
+                        ],
+                    },
+                    {
+                        $eq: [
+                            { $arrayElemAt: ['$workflowSteps.status', '$currentStepIndex'] },
+                            'Pending',
+                        ],
+                    },
+                ],
+            },
+        });
+    }
+
+    async getPendingApprovalsForManager(managerId: Types.ObjectId, reportIds: Types.ObjectId[]): Promise<LeaveHistory[]> {
+        return this.leaveHistoryModel.find({
+            employeeId: { $in: reportIds },
+            overallStatus: 'Pending',
+            $expr: {
+                $and: [
+                    { $lt: ['$currentStepIndex', { $size: '$workflowSteps' }] },
+                    {
+                        $eq: [
+                            { $arrayElemAt: ['$workflowSteps.approverId', '$currentStepIndex'] },
+                            managerId,
+                        ],
+                    },
+                    {
+                        $eq: [
+                            { $arrayElemAt: ['$workflowSteps.status', '$currentStepIndex'] },
+                            'Pending',
+                        ],
+                    },
+                ],
+            },
+        })
+            // Populates basic applicant info needed for the frontend ApprovalCard
+            .populate({
+                path: 'employeeId',
+                select: 'name position profileImageUrl',
+            })
+            // Sorts by newest requests first
+            .sort({ createdAt: -1 })
+            .lean();
+    }
+    async getResolvedHistoryForManager(
+        managerId: Types.ObjectId,
+        reportIds: Types.ObjectId[],
+        page: number,
+        limit: number,
+        status?: string
+    ): Promise<LeaveHistory[]> {
+
+        // Calculate the number of documents to skip based on the current page
+        const skip = (page - 1) * limit;
+
+        // 1. Construct the base query looking for steps the manager took action on
+        const query: any = {
+            employeeId: { $in: reportIds },
+            workflowSteps: {
+                $elemMatch: {
+                    actedById: managerId,
+                    status: { $in: ['Approved', 'Rejected', 'Cancelled'] }
+                }
+            }
+        };
+
+        // 2. If the frontend passes a specific status filter, append it to the query
+        if (status && ['Approved', 'Rejected', 'Cancelled'].includes(status)) {
+            query.overallStatus = status;
+        }
+
+        // 3. Execute the paginated query
+        return this.leaveHistoryModel.find(query)
+            .populate({
+                path: 'employeeId',
+                select: 'name position profileImageUrl',
+            })
+            .sort({ updatedAt: -1 }) // Newest structural actions first
+            .skip(skip)              // Skip previous pages
+            .limit(limit)            // Limit to chunks (10)
+            .lean();
+    }
+
+    async approveLeaveStepByManager(leaveId: string, managerId: string) {
+        const leave = await this.leaveHistoryModel.findById(leaveId);
+
+        if (!leave) throw new NotFoundException('Leave request not found');
+        if (leave.overallStatus !== 'Pending') throw new BadRequestException(`Leave is already completed with status: ${leave.overallStatus}`);
+
+        const currentStep = leave.workflowSteps[leave.currentStepIndex];
+
+        // --- AUTHORIZATION VALIDATION ---
+        if (currentStep.approverId?.toString() !== managerId) {
+            throw new UnauthorizedException('You are not the assigned manager for this active step.');
+        }
+
+        // Target the active index matching your current pointer level
+        const activeStep = leave.workflowSteps[leave.currentStepIndex];
+
+        activeStep.status = 'Approved';
+        activeStep.actedById = new Types.ObjectId(managerId);
+        activeStep.actedAt = new Date();
+
+        // Move pointers forward
+        leave.currentStepIndex += 1;
+
+        // Safely mark changes and commit to Mongo cluster
+        leave.markModified('workflowSteps');
+        await leave.save();
+
+        // --- OPTIONAL: NOTIFY THE NEXT APPROVER / APPLICANT ---
+        try {
+            const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'name fcmToken');
+            if (employee && employee.fcmToken) {
+                this.notificationService.sendToEmployee({
+                    token: employee.fcmToken,
+                    title: "Leave Status Updated ⏳",
+                    body: `Hi ${employee.name}, your manager approved your request. It is now pending final HR confirmation.`,
+                    data: {
+                        type: "LEAVE_UPDATE",
+                        leaveId: leave._id.toString(),
+                        status: "ManagerApproved"
+                    }
+                }).catch(e => console.error("FCM Async Error:", e));
+            }
+        } catch (e) {
+            console.error("Notification dispatch failed:", e);
+        }
+
+        return leave;
+    }
+
+    async rejectLeaveStepByManager(leaveId: string, managerId: string, remarks: string) {
+        if (!remarks || !remarks.trim()) {
+            throw new BadRequestException('Rejection remarks are mandatory.');
+        }
+
+        const leave = await this.leaveHistoryModel.findById(leaveId);
+        if (!leave) throw new NotFoundException('Leave request not found');
+        if (leave.overallStatus !== 'Pending') throw new BadRequestException(`Leave is already ${leave.overallStatus}`);
+
+        const currentIndex = leave.currentStepIndex;
+        const currentStep = leave.workflowSteps[currentIndex];
+
+        // --- AUTHORIZATION VALIDATION ---
+        if (currentStep.approverId?.toString() !== managerId) {
+            throw new UnauthorizedException('You are not the assigned manager for this active step.');
+        }
+
+        // --- TERMINATE WORKFLOW (Using explicit .set() for deep array safety) ---
+        leave.set(`workflowSteps.${currentIndex}.status`, 'Rejected');
+        leave.set(`workflowSteps.${currentIndex}.actedById`, new Types.ObjectId(managerId));
+        leave.set(`workflowSteps.${currentIndex}.actedAt`, new Date());
+        leave.set(`workflowSteps.${currentIndex}.remarks`, remarks.trim());
+
+        leave.overallStatus = 'Rejected';
+
+        //  REFUND THE TOKENS TO THE VAULT (With explicit 'Locked' target safety check)
+        if (leave.consumedLedgerIds && leave.consumedLedgerIds.length > 0) {
+            await this.leaveLedgerModel.updateMany(
+                { _id: { $in: leave.consumedLedgerIds }, status: 'Locked' },
+                { $set: { status: 'Active' } }
+            );
+        }
+
+        // Persist document mutations safely
+        await leave.save();
+
+        //  FIREBASE PUSH NOTIFICATION DISPATCH
+        try {
+            const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
+
+            if (employee && employee.fcmToken) {
+                // Fired asynchronously so the HTTP thread context does not stall waiting for external routing APIs
+                this.notificationService.sendToEmployee({
+                    token: employee.fcmToken,
+                    title: "Leave Rejected ❌",
+                    body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been rejected by Manager.`,
+                    data: {
+                        type: "LEAVE_UPDATE",
+                        leaveId: leave._id.toString(),
+                        status: "Rejected"
+                    }
+                }).catch(e => console.error("FCM Async Error:", e));
+            }
+        } catch (error) {
+            console.error("Failed to execute background notification routing sequence:", error);
+        }
+
+        return leave;
     }
 
 }

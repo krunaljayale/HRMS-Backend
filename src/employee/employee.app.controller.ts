@@ -1,15 +1,19 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Query, Req, Request, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, Request, UseGuards } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
 import { CreateFaceDto } from './dto/add-face-descriptor.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { Types } from 'mongoose';
+import { LeaveService } from '../leave/leave.service';
 
 @Controller('api/app/employee')
 export class EmployeeAppController {
-    constructor(private readonly employeeService: EmployeeService) { }
-
+    constructor(
+        private readonly employeeService: EmployeeService,
+        private readonly leaveService: LeaveService,
+    ) { }
 
     @Get('profile')
     @UseGuards(JwtAuthGuard)
@@ -110,5 +114,67 @@ export class EmployeeAppController {
         };
     }
 
+    @Get(':id/approval-metrics')
+    async getApprovalMetrics(@Param('id') id: string) {
+        // Basic verification check before sending execution down to the service layer
+        if (!Types.ObjectId.isValid(id)) {
+            throw new BadRequestException('Invalid employee ID format passed in parameters.');
+        }
+
+        return await this.employeeService.getManagerApprovalMetrics(id);
+    }
+
+    @Get(':id/detailed-requests')
+    async getDetailedRequests(@Param('id') id: string) {
+        // Basic verification check before sending execution down to the service layer
+        if (!Types.ObjectId.isValid(id)) {
+            throw new BadRequestException('Invalid employee ID format passed in parameters.');
+        }
+
+        return await this.employeeService.getManagerDetailedRequests(id);
+    }
+
+    @Get(':id/requests-history')
+    async getRequestsHistory(
+        @Param('id') id: string,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('status') status?: string,
+    ) {
+        if (!Types.ObjectId.isValid(id)) {
+            throw new BadRequestException('Invalid employee ID format passed in parameters.');
+        }
+
+        // Convert string query params to integers with default fallbacks
+        const pageNum = parseInt(page || '1', 10);
+        const limitNum = parseInt(limit || '10', 10);
+
+        return await this.employeeService.getManagerActionHistory(id, pageNum, limitNum, status);
+    }
+
+    @Patch(':managerId/leaves/:leaveId/approve')
+    async managerApproveLeave(
+        @Param('managerId') managerId: string,
+        @Param('leaveId') leaveId: string
+    ) {
+        if (!Types.ObjectId.isValid(managerId) || !Types.ObjectId.isValid(leaveId)) {
+            throw new BadRequestException('Invalid manager or leave tracking ID format.');
+        }
+
+        return await this.leaveService.approveLeaveStepByManager(leaveId, managerId);
+    }
+
+    @Patch(':managerId/leaves/:leaveId/reject')
+    async managerRejectLeave(
+        @Param('managerId') managerId: string,
+        @Param('leaveId') leaveId: string,
+        @Body('remarks') remarks: string
+    ) {
+        if (!Types.ObjectId.isValid(managerId) || !Types.ObjectId.isValid(leaveId)) {
+            throw new BadRequestException('Invalid manager or leave tracking ID format.');
+        }
+
+        return await this.leaveService.rejectLeaveStepByManager(leaveId, managerId, remarks);
+    }
 
 }

@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UploadedFiles,
@@ -338,14 +339,43 @@ export class HrWebController {
 
   @Get('employees/:id')
   @UseGuards(JwtAuthGuard)
-  async getEmployee(@Param('id') employeeId: string) {
-    const employee = await this.employeeService.getEmployeeById(employeeId);
+  async getEmployee(
+    @Param('id') employeeId: string,
+    @Query('fields') fields?: string,
+  ) {
+    const selectFields = fields ? fields.split(',').join(' ') : undefined;
+
+    const employee = await this.employeeService.getEmployeeById(employeeId, selectFields);
 
     return {
       success: true,
       message: 'Employee fetched successfully',
       data: employee,
     };
+  }
+
+  @Put('employees/:id')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'experienceCertificate', maxCount: 1 },
+      { name: 'twelfthMarksheet', maxCount: 1 },
+      { name: 'tenthMarksheet', maxCount: 1 },
+      { name: 'graduationMarksheet', maxCount: 1 },
+      { name: 'postGraduationMarksheet', maxCount: 1 },
+      { name: 'aadhaarFile', maxCount: 1 },
+      { name: 'panFile', maxCount: 1 },
+      { name: 'passbookFile', maxCount: 1 },
+      { name: 'medicalDocument', maxCount: 1 },
+    ]),
+  )
+  async updateEmployeeProfile(
+    @Param('id') id: string,
+    @Body() employeeData: any,
+    @UploadedFiles() files: Record<string, Express.Multer.File[]>,
+  ) {
+    return this.employeeService.updateEmployeeProfile(id, employeeData, files);
   }
 
   // ─── 1. STATIC PATHS GO FIRST ───
@@ -383,10 +413,10 @@ export class HrWebController {
       toDate,
       body.targetMonth,
       body.targetYear,
-      req.user.employeeId 
+      req.user.employeeId
     );
   }
 
-
+  
 
 }

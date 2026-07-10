@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -12,12 +14,15 @@ import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
 import { GetDirectoryDto } from './dto/get-directory.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { LeaveService } from '../leave/leave.service';
 
 @Injectable()
 export class EmployeeService {
   constructor(
     @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
     private readonly cloudinaryService: CloudinaryService,
+    @Inject(forwardRef(() => LeaveService))
+    private readonly leaveService: LeaveService,
   ) { }
 
   async validatePassword(
@@ -654,4 +659,206 @@ export class EmployeeService {
       );
     }
   }
+
+  async updateEmployeeProfile(
+    id: string,
+    rawData: any,
+    files: Record<string, Express.Multer.File[]>,
+  ) {
+    const uploadedUrls: Record<string, string> = {};
+
+    // 1. Process NEW files if any were uploaded
+    if (files && Object.keys(files).length > 0) {
+      const fileKeys = Object.keys(files);
+      const chunkSize = 3;
+
+      for (let i = 0; i < fileKeys.length; i += chunkSize) {
+        const chunk = fileKeys.slice(i, i + chunkSize);
+        await Promise.all(
+          chunk.map(async (fieldKey) => {
+            const fileArray = files[fieldKey];
+            if (fileArray && fileArray[0]) {
+              try {
+                const uploadResult = await this.cloudinaryService.uploadFile(
+                  fileArray[0],
+                  `new_hrms_employees_data/${rawData.employeeCode || 'unassigned'}`,
+                );
+                uploadedUrls[fieldKey] = uploadResult.secure_url;
+              } catch (error) {
+                console.error(`Failed to upload ${fieldKey}:`, error);
+                throw new BadRequestException(`File upload failed for ${fieldKey}`);
+              }
+            }
+          }),
+        );
+      }
+    }
+
+    // 2. Safe parsing of the address structure object
+    let parsedAddress = rawData.address;
+    if (typeof rawData.address === 'string') {
+      try {
+        parsedAddress = JSON.parse(rawData.address);
+      } catch (e) {
+        throw new BadRequestException('The address field must be valid JSON');
+      }
+    }
+
+    // 3. Safe ObjectId Conversion for managerId
+    let castedManagerId: Types.ObjectId | undefined = undefined;
+    if (rawData.managerId && Types.ObjectId.isValid(rawData.managerId)) {
+      castedManagerId = new Types.ObjectId(rawData.managerId);
+    }
+
+    // 4. Flatten structure out and apply defensive data-type casting
+    const sanitizedData = {
+      ...rawData,
+      address: parsedAddress,
+      ...(castedManagerId && { managerId: castedManagerId }),
+      isAppAdmin: rawData.isAppAdmin === 'true' || rawData.isAppAdmin === true,
+      isLeadershipRole: rawData.isLeadershipRole === 'true' || rawData.isLeadershipRole === true,
+
+      salary: rawData.salary && !isNaN(Number(rawData.salary)) ? Number(rawData.salary) : undefined,
+      fixedAllowance: rawData.fixedAllowance && !isNaN(Number(rawData.fixedAllowance)) ? Number(rawData.fixedAllowance) : undefined,
+      totalExperienceYears: rawData.totalExperienceYears && !isNaN(Number(rawData.totalExperienceYears)) ? Number(rawData.totalExperienceYears) : undefined,
+      hscPercent: rawData.hscPercent && !isNaN(Number(rawData.hscPercent)) ? Number(rawData.hscPercent) : undefined,
+      graduationPercent: rawData.graduationPercent && !isNaN(Number(rawData.graduationPercent)) ? Number(rawData.graduationPercent) : undefined,
+      postGraduationPercent: rawData.postGraduationPercent && !isNaN(Number(rawData.postGraduationPercent)) ? Number(rawData.postGraduationPercent) : undefined,
+
+      // Apply new URLs only if they were newly uploaded
+      ...(uploadedUrls.profileImage && { profileImageUrl: uploadedUrls.profileImage }),
+      ...(uploadedUrls.experienceCertificate && { experienceCertificateUrl: uploadedUrls.experienceCertificate }),
+      ...(uploadedUrls.twelfthMarksheet && { twelfthMarksheetUrl: uploadedUrls.twelfthMarksheet }),
+      ...(uploadedUrls.tenthMarksheet && { tenthMarksheetUrl: uploadedUrls.tenthMarksheet }),
+      ...(uploadedUrls.graduationMarksheet && { graduationMarksheetUrl: uploadedUrls.graduationMarksheet }),
+      ...(uploadedUrls.postGraduationMarksheet && { postGraduationMarksheetUrl: uploadedUrls.postGraduationMarksheet }),
+      ...(uploadedUrls.aadhaarFile && { aadhaarFileUrl: uploadedUrls.aadhaarFile }),
+      ...(uploadedUrls.panFile && { panFileUrl: uploadedUrls.panFile }),
+      ...(uploadedUrls.passbookFile && { passbookFileUrl: uploadedUrls.passbookFile }),
+      ...(uploadedUrls.medicalDocument && { medicalDocumentUrl: uploadedUrls.medicalDocument }),
+    };
+
+    // Remove empty/undefined properties to prevent overwriting existing DB data with nulls
+    Object.keys(sanitizedData).forEach((key) => {
+      if (sanitizedData[key] === undefined || sanitizedData[key] === '') {
+        delete sanitizedData[key];
+      }
+    });
+
+    // 5. Update DB
+    try {
+      const updatedEmployee = await this.employeeModel.findByIdAndUpdate(
+        id,
+        { $set: sanitizedData },
+        { new: true, runValidators: true }
+      );
+      if (!updatedEmployee) throw new NotFoundException('Employee not found');
+      return updatedEmployee;
+    } catch (dbError: any) {
+      console.error('Update failed:', dbError);
+      throw new BadRequestException(`Database update failed: ${dbError.message}`);
+    }
+  }
+
+  async getManagerApprovalMetrics(managerId: string) {
+    if (!Types.ObjectId.isValid(managerId)) {
+      throw new BadRequestException('Invalid manager ID format.');
+    }
+
+    const targetId = new Types.ObjectId(managerId);
+
+    // 1. Fetch manager metadata profile
+    const manager = await this.employeeModel.findById(targetId).select('isLeadershipRole').lean();
+    if (!manager) {
+      throw new NotFoundException('Employee profile not found.');
+    }
+
+    if (!manager.isLeadershipRole) {
+      return { isLeadership: false, pendingApprovalsCount: 0 };
+    }
+
+    // 2. Fetch reporting employee document reference records
+    const directReportEmployees = await this.employeeModel
+      .find({ managerId: targetId })
+      .select('_id')
+      .lean();
+
+    const reportIds = directReportEmployees.map((emp) => emp._id);
+
+    if (reportIds.length === 0) {
+      return { isLeadership: true, pendingApprovalsCount: 0 };
+    }
+
+    // 3. Delegate cross-module query context to the correct service safely
+    const pendingCount = await this.leaveService.countPendingApprovalsForManager(targetId, reportIds);
+
+    return {
+      isLeadership: true,
+      pendingApprovalsCount: pendingCount,
+    };
+  }
+
+  /**
+ * Orchestrates fetching full detailed pending leave requests for a specific manager
+ * @param managerId string representing the employee ObjectId
+ */
+  async getManagerDetailedRequests(managerId: string) {
+    if (!Types.ObjectId.isValid(managerId)) {
+      throw new BadRequestException('Invalid manager ID format.');
+    }
+
+    const targetId = new Types.ObjectId(managerId);
+
+    // 1. Fetch manager metadata profile to confirm leadership status
+    const manager = await this.employeeModel.findById(targetId).select('isLeadershipRole').lean();
+    if (!manager) {
+      throw new NotFoundException('Employee profile not found.');
+    }
+
+    if (!manager.isLeadershipRole) {
+      return []; // Return empty array immediately if not a leadership account
+    }
+
+    // 2. Compile reporting employee document IDs
+    const directReportEmployees = await this.employeeModel
+      .find({ managerId: targetId })
+      .select('_id')
+      .lean();
+
+    const reportIds = directReportEmployees.map((emp) => emp._id);
+
+    if (reportIds.length === 0) {
+      return []; // No subordinates means zero pending items
+    }
+
+    // 3. Request data payload from the Leave module layer safely
+    return await this.leaveService.getPendingApprovalsForManager(targetId, reportIds);
+  }
+
+  /**
+ * Orchestrates fetching historically processed leave actions for a manager
+ */
+  async getManagerActionHistory(managerId: string, page: number, limit: number, status?: string) {
+    if (!Types.ObjectId.isValid(managerId)) {
+      throw new BadRequestException('Invalid manager ID format.');
+    }
+
+    const targetId = new Types.ObjectId(managerId);
+
+    const manager = await this.employeeModel.findById(targetId).select('isLeadershipRole').lean();
+    if (!manager || !manager.isLeadershipRole) {
+      return [];
+    }
+
+    const directReportEmployees = await this.employeeModel
+      .find({ managerId: targetId })
+      .select('_id')
+      .lean();
+
+    const reportIds = directReportEmployees.map((emp) => emp._id);
+    if (reportIds.length === 0) return [];
+
+    return await this.leaveService.getResolvedHistoryForManager(targetId, reportIds, page, limit, status);
+  }
+
 }

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
-import { AttendanceDocument } from './schemas/attendance.schema';
+import { Attendance, AttendanceDocument } from './schemas/attendance.schema';
 import { HolidayService } from '../holiday/holiday.service';
 import { getDistanceInMeters } from './utils/geo.util';
 import { CheckInDto, CheckOutDto } from './dto/punch.dto';
@@ -11,6 +11,7 @@ import { TrackLocationDto } from './dto/track-location.dto';
 import { LeaveService } from '../leave/leave.service';
 import { CorrectionRequestDto } from './dto/request-correction.dto';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class AttendanceService {
@@ -24,6 +25,7 @@ export class AttendanceService {
         private holidayService: HolidayService,
         private employeeService: EmployeeService,
         private leaveService: LeaveService,
+        private readonly notificationService: NotificationService,
         private readonly systemConfigService: SystemConfigService,
     ) { }
 
@@ -536,6 +538,52 @@ export class AttendanceService {
             .exec() as unknown as AttendanceDocument[];
     }
 
+    async getTeamReportsForManager(managerId: string, dateStr: string): Promise<any[]> {
+        const records = await this.attendanceModel
+            .find({
+                date: dateStr, // Direct string match against '2026-07-10'
+
+                $expr: {
+                    $eq: [{ $toString: '$reportParticipant' }, managerId]
+                }
+            })
+            .populate({
+                path: 'employeeId', // Populates the actual employee profile
+                select: 'name position profileImageUrl',
+            })
+            .sort({ inTime: -1 })
+            .lean();
+
+        // Map the populated employeeId back to reportParticipant to keep the mobile UI happy
+        return records.map((record: any) => ({
+            ...record,
+            reportParticipant: record.employeeId,
+        }));
+    }
+
+    /**
+    * Updates the read status tracker flag for a specific daily work report document.
+    */
+    async updateWorkReportReadStatus(reportId: string, isReportRead: boolean): Promise<Attendance> {
+        const updatedReport = await this.attendanceModel.findByIdAndUpdate(
+            new Types.ObjectId(reportId),
+            { $set: { isReportRead } },
+
+            // Swap { new: true } with this to eliminate the deprecation warning completely
+            { returnDocument: 'after' }
+        )
+            .populate({
+                path: 'employeeId',
+                select: 'name position profileImageUrl',
+            })
+            .lean();
+
+        if (!updatedReport) {
+            throw new NotFoundException(`No attendance or work report record found with ID: ${reportId}`);
+        }
+
+        return updatedReport;
+    }
 
     // ─────────────────────────────────────── HR SEVICES START ──────────────────────────────────────────
 
@@ -799,7 +847,6 @@ export class AttendanceService {
     }
 
     async approveCorrection(attendanceId: string, adminId: string, remark: string = 'Approved by HR') {
-
         const record = await this.attendanceModel.findById(attendanceId);
 
         if (!record) throw new NotFoundException('Attendance record not found');
@@ -855,10 +902,33 @@ export class AttendanceService {
         });
 
         await record.save();
+
+        // --- ASYNC NOTIFICATION DISPATCH ---
+        try {
+            // Fetch the employee's name and FCM token
+            const employee = await this.employeeService.getEmployeeById(record.employeeId.toString(), 'name fcmToken');
+
+            if (employee && employee.fcmToken) {
+                this.notificationService.sendToEmployee({
+                    token: employee.fcmToken,
+                    title: "Correction Request Approved ✅",
+                    body: `Hi ${employee.name}, your attendance correction for ${record.date} was approved. Remark: ${remark}`,
+                    data: {
+                        type: "ATTENDANCE_CORRECTION_UPDATE",
+                        attendanceId: record._id.toString(),
+                        status: "Approved"
+                    }
+                }).catch(e => console.error("FCM Async Error:", e));
+            }
+        } catch (e) {
+            // Fails gracefully without breaking the HTTP response
+            console.error("Attendance correction approval notification dispatch failed:", e);
+        }
+
         return record;
     }
 
-    async rejectCorrection(attendanceId: string, adminId: string, remark: string = 'Rejected by HR') {
+    async rejectCorrection(attendanceId: string, adminId: string, remark: string) {
         const record = await this.attendanceModel.findById(attendanceId);
 
         if (!record) throw new NotFoundException('Attendance record not found');
@@ -878,9 +948,31 @@ export class AttendanceService {
             timestamp: new Date()
         });
 
-        // 🚨 REMOVED: We no longer clear `activeCorrectionRequest` here either.
-
         await record.save();
+
+        // 3. --- ASYNC NOTIFICATION DISPATCH ---
+        try {
+            // Fetch the employee's name and FCM token using the relation on the attendance record
+            const employee = await this.employeeService.getEmployeeById(record.employeeId.toString(), 'name fcmToken');
+
+            if (employee && employee.fcmToken) {
+                this.notificationService.sendToEmployee({
+                    token: employee.fcmToken,
+                    title: "Correction Request Rejected ❌",
+                    // Include the exact date and HR's remark in the push notification body
+                    body: `Hi ${employee.name}, your attendance correction for ${record.date} was rejected. Reason: ${remark}`,
+                    data: {
+                        type: "ATTENDANCE_CORRECTION_UPDATE",
+                        attendanceId: record._id.toString(),
+                        status: "Rejected"
+                    }
+                }).catch(e => console.error("FCM Async Error:", e));
+            }
+        } catch (e) {
+            // Fails gracefully without breaking the HTTP response
+            console.error("Attendance correction notification dispatch failed:", e);
+        }
+
         return record;
     }
 

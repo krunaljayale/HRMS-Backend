@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CheckInDto, CheckOutDto } from './dto/punch.dto';
 import { TrackLocationDto } from './dto/track-location.dto';
 import { CorrectionRequestDto } from './dto/request-correction.dto';
+import { Types } from 'mongoose';
 
 @Controller('api/app/attendance')
 export class AttendanceAppController {
@@ -137,4 +138,54 @@ export class AttendanceAppController {
       message: result.message,
     };
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('team-reports')
+  async getTeamReports(
+    @Req() req,
+    @Query('date') date: string,
+  ) {
+    // Securely extract the identity from the verified token object context
+    const managerId = req.user.employeeId;
+
+    if (!date) {
+      throw new BadRequestException('Date query parameter is required.');
+    }
+
+    const data = await this.attendanceService.getTeamReportsForManager(managerId, date);
+
+    return {
+      statusCode: 200,
+      data: data,
+      message: 'Team work reports fetched successfully.'
+    };
+  }
+
+  /**
+   * Updates the read/reviewed status tracker flag for an individual work report document.
+   * Route: PATCH /api/app/attendance/work-reports/:reportId/read-status
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('work-reports/:reportId/read-status')
+  async updateReportReadStatus(
+    @Param('reportId') reportId: string,
+    @Body('isReportRead') isReportRead: boolean,
+  ) {
+    if (!Types.ObjectId.isValid(reportId)) {
+      throw new BadRequestException('Invalid work report ID format provided.');
+    }
+    if (typeof isReportRead !== 'boolean') {
+      throw new BadRequestException('isReportRead body parameter must be a boolean value.');
+    }
+
+    const data = await this.attendanceService.updateWorkReportReadStatus(reportId, isReportRead);
+
+    return {
+      statusCode: 200,
+      data: data,
+      message: 'Work report status updated successfully.'
+    };
+  }
+
+
 }

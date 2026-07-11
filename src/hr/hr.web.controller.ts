@@ -144,10 +144,20 @@ export class HrWebController {
 
   @Patch('attendance/corrections/:id/reject')
   @UseGuards(JwtAuthGuard)
-  async rejectCorrection(@Param('id') attendanceId: string, @Req() req: any) {
+  async rejectCorrection(
+    @Param('id') attendanceId: string,
+    @Body('remark') remark: string,
+    @Req() req: any
+  ) {
     const adminId = req.user.sub;
 
-    await this.attendanceService.rejectCorrection(attendanceId, adminId);
+    // Backend validation: Ensure the remark is not empty
+    if (!remark || !remark.trim()) {
+      throw new BadRequestException('A rejection remark is strictly required.');
+    }
+
+    // Pass the extracted remark into the service
+    await this.attendanceService.rejectCorrection(attendanceId, adminId, remark.trim());
 
     return { success: true, message: 'Correction rejected successfully' };
   }
@@ -417,6 +427,6 @@ export class HrWebController {
     );
   }
 
-  
+
 
 }

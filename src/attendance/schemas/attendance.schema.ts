@@ -163,6 +163,9 @@ export class Attendance extends Document { // Extends Document for _id typings
     @Prop({ type: Types.ObjectId, ref: 'Employee', index: true })
     reportParticipant!: Types.ObjectId;
 
+    @Prop({ default: false })
+    isReportRead!: boolean;
+
     @Prop({ type: [{ type: Types.ObjectId, ref: 'Employee' }], default: [] })
     reportReadBy?: Types.ObjectId[];
 }

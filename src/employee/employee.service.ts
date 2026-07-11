@@ -492,7 +492,6 @@ export class EmployeeService {
       employeeCode: manager.employeeCode,
     }));
   }
-
   async generateNewEmployeeCode(): Promise<string> {
     // 1. Find the employee with the highest employeeCode, excluding the Play Store account
     const lastEmployee = await this.employeeModel

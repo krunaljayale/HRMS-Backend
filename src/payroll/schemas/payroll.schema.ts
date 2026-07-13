@@ -13,6 +13,9 @@ export class Earnings {
   @Prop({ default: 0 })
   allowances!: number;
 
+  @Prop({ default: 0 })
+  reimbursements!: number;
+
   @Prop({ required: true })
   totalGross!: number; // (Total Earnings / totalCycleDays) * paidDays
 }

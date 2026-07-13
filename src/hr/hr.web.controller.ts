@@ -29,6 +29,7 @@ import 'multer';
 import { GetPayrollListQueryDto } from '../payroll/dto/get-payroll-list.dto';
 import { PayrollService } from '../payroll/payroll.service';
 import { ProcessAllActivePayrollDto } from '../payroll/dto/process-all-active-payroll.dto';
+import { ReimbursementService } from '../reimbursement/reimbursement.service';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -38,6 +39,7 @@ export class HrWebController {
     private readonly employeeService: EmployeeService,
     private readonly leaveService: LeaveService,
     private readonly payrollService: PayrollService,
+    private readonly reimbursementService: ReimbursementService,
   ) { }
 
   @Get('get-general-stats')
@@ -427,6 +429,45 @@ export class HrWebController {
     );
   }
 
+  @Get('reimbursement/pending')
+  @UseGuards(JwtAuthGuard)
+  async getPendingReimbursements() {
+    return await this.reimbursementService.getPendingClaimsForHr();
+  }
+
+  // Approve an incoming claim
+  @Patch('reimbursement/:id/approve')
+  @UseGuards(JwtAuthGuard)
+  async approveReimbursement(
+    @Param('id') id: string,
+    @Req() req: any
+  ) {
+    const hrId = req.user.employeeId;
+    if (!hrId) {
+      throw new BadRequestException('HR operator identification context missing');
+    }
+    return await this.reimbursementService.approveClaimByHr(id, hrId);
+  }
+
+  // Reject an incoming claim with a mandatory justification reason
+  @Patch('reimbursement/:id/reject')
+  @UseGuards(JwtAuthGuard)
+  async rejectReimbursement(
+    @Param('id') id: string,
+    @Body() body: { rejectionReason: string },
+    @Req() req: any
+  ) {
+    const hrId = req.user.employeeId;
+    if (!hrId) {
+      throw new BadRequestException('HR operator identification context missing');
+    }
+    return await this.reimbursementService.rejectClaimByHr(id, hrId, body.rejectionReason);
+  }
+
+  @Get('reimbursement/historical')
+  async getHistoricalReimbursements() {
+    return await this.reimbursementService.getHistoricalClaimsForHr();
+  }
 
 
 }

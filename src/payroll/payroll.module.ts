@@ -7,6 +7,7 @@ import { EmployeeModule } from '../employee/employee.module';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { LeaveModule } from '../leave/leave.module';
 import { HolidayModule } from '../holiday/holiday.module';
+import { ReimbursementModule } from '../reimbursement/reimbursement.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { HolidayModule } from '../holiday/holiday.module';
     AttendanceModule,
     LeaveModule,
     HolidayModule,
+    ReimbursementModule,
   ],
   controllers: [PayrollAppController],
   providers: [PayrollService],

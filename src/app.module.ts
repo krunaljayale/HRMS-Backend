@@ -17,6 +17,7 @@ import { ResignationModule } from './resignation/resignation.module';
 import { HrModule } from './hr/hr.module';
 import { NotificationsModule } from './notification/notification.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { ReimbursementModule } from './reimbursement/reimbursement.module';
 
 @Module({
   imports: [
@@ -62,6 +63,8 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     NotificationsModule,
 
     CloudinaryModule,
+
+    ReimbursementModule,
   ],
   controllers: [AppController],
   providers: [AppService],

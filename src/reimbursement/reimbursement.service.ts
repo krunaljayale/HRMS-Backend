@@ -2,7 +2,7 @@
 
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { Reimbursement, ReimbursementDocument } from './schemas/reimbursement.schema';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { EmployeeService } from '../employee/employee.service';
@@ -207,17 +207,33 @@ export class ReimbursementService {
 
     // ------------------------------------For Payroll Service START------------------------------------- //
     // Fetch approved claims that haven't been paid out yet, up to the end of the payroll cycle
-    async getApprovedUnpaidClaims(employeeId: string, toDate: Date) {
-        return await this.reimbursementModel.find({
+    async getApprovedUnpaidClaims(
+        employeeId: string,
+        toDate: Date,
+        existingPayrollId?: Types.ObjectId // <-- Added optional 3rd argument
+    ) {
+        const query: any = {
             employeeId: new Types.ObjectId(employeeId),
             hrStatus: 'Approved',
-            paymentStatus: 'Unpaid',
             createdAt: { $lte: toDate }, // Ensures we don't accidentally sweep claims made *after* the cycle ends
-        }).lean().exec();
+        };
+
+        // If checking a preview for an existing payroll, fetch Unpaid + claims paid by this exact payroll
+        if (existingPayrollId) {
+            query.$or = [
+                { paymentStatus: 'Unpaid' },
+                { payrollId: existingPayrollId }
+            ];
+        } else {
+            // Standard generation behavior: just get Unpaid claims
+            query.paymentStatus = 'Unpaid';
+        }
+
+        return await this.reimbursementModel.find(query).lean().exec();
     }
 
     // Mark claims as paid and link the payroll document ID
-    async markClaimsAsPaid(claimIds: Types.ObjectId[], payrollId: Types.ObjectId) {
+    async markClaimsAsPaid(claimIds: Types.ObjectId[], payrollId: Types.ObjectId, session?: ClientSession) {
         if (!claimIds || claimIds.length === 0) return;
 
         await this.reimbursementModel.updateMany(
@@ -225,9 +241,28 @@ export class ReimbursementService {
             {
                 $set: {
                     paymentStatus: 'Paid',
-                    payrollId: payrollId
-                }
-            }
+                    payrollId: payrollId,
+                },
+            },
+            { session }, // Apply session
+        );
+    }
+
+    // Release claims back to Unpaid if a payroll calculation is re-run
+    async resetClaimsByPayrollId(payrollId: Types.ObjectId, session?: ClientSession) {
+        if (!payrollId) return;
+
+        await this.reimbursementModel.updateMany(
+            { payrollId: payrollId },
+            {
+                $set: {
+                    paymentStatus: 'Unpaid',
+                },
+                $unset: {
+                    payrollId: '',
+                },
+            },
+            { session }, // Apply session
         );
     }
 
@@ -239,6 +274,41 @@ export class ReimbursementService {
 
         return await this.reimbursementModel.find({
             _id: { $in: claimIds }
+        }).lean().exec();
+    }
+
+    async getClaimsForPayrollCalculation(
+        employeeId: string,
+        toDate: Date,
+        existingPayrollId?: Types.ObjectId,
+        session?: ClientSession
+    ) {
+        const query: any = {
+            employeeId: new Types.ObjectId(employeeId),
+            hrStatus: 'Approved',
+            createdAt: { $lte: toDate },
+        };
+
+        // If a payroll exists, fetch Unpaid claims OR claims already paid by this exact payroll
+        if (existingPayrollId) {
+            query.$or = [
+                { paymentStatus: 'Unpaid' },
+                { payrollId: existingPayrollId }
+            ];
+        } else {
+            query.paymentStatus = 'Unpaid';
+        }
+
+        return await this.reimbursementModel.find(query).session(session || null).lean().exec();
+    }
+
+    // Fetch all claims that were paid out in a specific payroll cycle
+    async findPaidClaimsByPayrollId(payrollId: Types.ObjectId) {
+        if (!payrollId) return [];
+
+        return await this.reimbursementModel.find({
+            payrollId: payrollId,
+            paymentStatus: 'Paid'
         }).lean().exec();
     }
     // ------------------------------------For Payroll Service END------------------------------------- //

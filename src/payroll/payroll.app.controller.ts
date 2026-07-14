@@ -6,7 +6,8 @@ import {
   UseGuards,
   BadRequestException,
   Get,
-  Query
+  Query,
+  Param
 } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -111,6 +112,31 @@ export class PayrollAppController {
       statusCode: 200,
       data: simulation,
       message: 'Preview generated successfully'
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/details')
+  async getPayrollDetails(@Req() req: any, @Param('id') payrollId: string) {
+    const targetEmployeeId = req.user.employeeId;
+
+    if (!targetEmployeeId) {
+      throw new BadRequestException('targetEmployeeId is required in token');
+    }
+
+    if (!payrollId) {
+      throw new BadRequestException('Payroll ID is required');
+    }
+
+    const details = await this.payrollService.getHistoricalPayrollDetails(
+      payrollId,
+      targetEmployeeId
+    );
+
+    return {
+      statusCode: 200,
+      data: details,
+      message: 'Statement details fetched successfully',
     };
   }
 }

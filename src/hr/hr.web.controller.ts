@@ -397,7 +397,8 @@ export class HrWebController {
     @Req() req: any,
     @Query() queryDto: GetPayrollListQueryDto
   ) {
-    return await this.payrollService.getPayrollList(req.user, queryDto);
+    const data = await this.payrollService.getPayrollList(req.user, queryDto);
+    return data
   }
 
   @Post('payroll/process-all-active')

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Employee, EmployeeDocument } from './schemas/employee.schema';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { UpdateFcmTokenDto } from './dto/update-fcm.dto';
@@ -98,19 +98,25 @@ export class EmployeeService {
   async getEmployeeById(
     id: string,
     selectFields?: string | Record<string, number | boolean>,
+    session?: ClientSession, // 1. Make session an optional parameter
   ): Promise<Employee> {
-    // 1. Build the base query
+    // 2. Build the base query
     let query = this.employeeModel.findById(id);
 
-    // 2. If specific fields are requested, chain the select method
+    // 3. If specific fields are requested, chain the select method
     if (selectFields) {
       query = query.select(selectFields);
     }
 
-    // 3. Execute the query
+    // 4. If a session is passed, attach it to the query
+    if (session) {
+      query = query.session(session);
+    }
+
+    // 5. Execute the query
     const employee = await query.exec();
 
-    // 4. Hard stop if the user doesn't exist
+    // 6. Hard stop if the user doesn't exist
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }

@@ -7,6 +7,7 @@ import { IWorkflowStep } from './interfaces/workflow-step.interface';
 import { LeaveLedger, LeaveLedgerDocument } from './schemas/leave-ledger.schema';
 import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import { NotificationService } from '../notification/notification.service';
+import { ClientSession } from 'mongoose';
 
 @Injectable()
 export class LeaveService {
@@ -588,7 +589,7 @@ export class LeaveService {
     }
 
     // ── PAYROLL ENGINE HELPER: FETCH APPROVED LEAVES IN RANGE ──
-    async findApprovedLeavesInRange(employeeId: string, fromDate: Date, toDate: Date): Promise<LeaveHistory[]> {
+    async findApprovedLeavesInRange(employeeId: string, fromDate: Date, toDate: Date, session?: ClientSession): Promise<LeaveHistory[]> {
         return await this.leaveHistoryModel
             .find({
                 employeeId: new Types.ObjectId(employeeId),
@@ -596,6 +597,7 @@ export class LeaveService {
                 startDate: { $lte: toDate },
                 endDate: { $gte: fromDate },
             })
+            .session(session || null)
             .sort({ startDate: 1 })
             .lean(); // plain JS objects for clean map/reduce iterations in the payroll engine
     }

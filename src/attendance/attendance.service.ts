@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { ClientSession, Model, PipelineStage, Types } from 'mongoose';
 import { Attendance, AttendanceDocument } from './schemas/attendance.schema';
 import { HolidayService } from '../holiday/holiday.service';
 import { getDistanceInMeters } from './utils/geo.util';
@@ -98,12 +98,11 @@ export class AttendanceService {
             }
 
             // 4. Logic for late calculation
-            const shiftStart = createTodayISTThreshold('09:30:00');
             const bufferLimit = createTodayISTThreshold('10:00:00');
 
             //  Use the 'now' Date object for the math
             const isLate = now > bufferLimit;
-            const lateMinutes = isLate ? Math.round((now.getTime() - shiftStart.getTime()) / 60000) : 0;
+            const lateMinutes = isLate ? Math.round((now.getTime() - bufferLimit.getTime()) / 60000) : 0;
 
             // 5. Create new record
             const [attendance] = await this.attendanceModel.create([{
@@ -521,7 +520,7 @@ export class AttendanceService {
     }
 
     // ── PAYROLL ENGINE HELPER: FETCH RECORDS IN RANGE ──
-    async findRecordsInRange(employeeId: string, fromDate: Date, toDate: Date): Promise<AttendanceDocument[]> {
+    async findRecordsInRange(employeeId: string, fromDate: Date, toDate: Date, session?: ClientSession): Promise<AttendanceDocument[]> {
         const startDateStr = getIST('date', fromDate);
         const endDateStr = getIST('date', toDate);
 
@@ -533,6 +532,7 @@ export class AttendanceService {
                     $lte: endDateStr,
                 },
             })
+            .session(session || null) // Safely inject the session into the chain
             .sort({ date: 1 }) // Keep days sequential for calculation iterations
             .lean() // Plain JS objects for high performance processing
             .exec() as unknown as AttendanceDocument[];

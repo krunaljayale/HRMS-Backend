@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { ClientSession, Model } from 'mongoose';
 import { Holiday } from './schemas/holiday.schema';
 import { CreateHolidayDto } from './dto/create-holiday.dto';
 
@@ -80,7 +80,7 @@ export class HolidayService {
     }
 
     // ── PAYROLL ENGINE HELPER: FETCH HOLIDAYS IN RANGE ──
-    async findHolidaysInRange(fromDate: Date, toDate: Date): Promise<Holiday[]> {
+    async findHolidaysInRange(fromDate: Date, toDate: Date, session?: ClientSession): Promise<Holiday[]> {
         return await this.holidayModel
             .find({
                 date: {
@@ -89,6 +89,7 @@ export class HolidayService {
                 },
                 isActive: true, // Crucial: Ensures canceled holidays are not processed in payroll
             })
+            .session(session || null) // Safely inject the session into the chain
             .sort({ date: 1 }) // Sorted chronologically
             .lean(); // Using .lean() for faster, lightweight plain JS objects since we don't need Mongoose instance methods here
     }

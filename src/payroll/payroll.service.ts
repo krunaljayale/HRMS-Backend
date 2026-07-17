@@ -20,6 +20,7 @@ import {
 } from '../utils/payroll.helper';
 import { GetPayrollListQueryDto } from './dto/get-payroll-list.dto';
 import { ReimbursementService } from '../reimbursement/reimbursement.service';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class PayrollService {
@@ -665,4 +666,228 @@ export class PayrollService {
       isSimulation: false,
     };
   }
+
+  async exportPayrollToExcel(targetMonth: number, targetYear: number): Promise<Buffer> {
+    // 1. Fetch ALL payroll records for the specific cycle without pagination
+    // Added { $ne: 'IA11111' } to exclude the Play Store testing account
+    const payrolls = await this.payrollModel
+      .find({
+        month: targetMonth,
+        year: targetYear,
+        employeeCode: { $ne: 'IA11111' }
+      })
+      .populate(
+        'employeeId',
+        'name employeeCode department position bankName accountNumber ifsc branch panNumber joiningDate'
+      )
+      .sort({ employeeCode: 1 })
+      .lean()
+      .exec();
+
+    if (!payrolls || payrolls.length === 0) {
+      throw new NotFoundException('No payroll records found for the selected cycle.');
+    }
+
+    // 2. Initialize Excel Workbook and Worksheet
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Infinity Arthvishva HRMS';
+    const worksheet = workbook.addWorksheet('Payroll Summary', {
+      views: [{ state: 'frozen', ySplit: 4 }] // Freezes top headers
+    });
+
+    // 3. Define Columns mapped exactly to your new schema
+    worksheet.columns = [
+      { header: 'Sr. No.', key: 'srNo', width: 8 },
+      { header: 'Employee No', key: 'empNo', width: 15 },
+      { header: 'Employee Name', key: 'empName', width: 25 },
+      { header: 'Designation', key: 'designation', width: 20 },
+      { header: 'PAN No', key: 'pan', width: 15 },
+      { header: 'Bank Name', key: 'bankName', width: 20 },
+      { header: 'Bank Account Number', key: 'accNo', width: 22 },
+      { header: 'IFSC Code', key: 'ifsc', width: 15 },
+      { header: 'Bank Branch', key: 'branch', width: 15 },
+      { header: 'Joining Date', key: 'joiningDate', width: 15 },
+      { header: 'Total Days', key: 'cycleDays', width: 15 },
+      { header: 'Paid Days', key: 'paidDays', width: 12 },
+      { header: 'Present Days', key: 'present', width: 12 },
+      { header: 'Half Days', key: 'halfDays', width: 12 },
+      { header: 'Absent Days', key: 'absent', width: 12 },
+      { header: 'Paid Leaves', key: 'paidLeaves', width: 12 },
+      { header: 'Unpaid Leaves', key: 'unpaidLeaves', width: 15 },
+      { header: 'Comp Off Days', key: 'compOffs', width: 15 },
+      { header: 'Holidays', key: 'holidays', width: 12 },
+      { header: 'Week Offs', key: 'weekOffs', width: 12 },
+      { header: 'Sandwich Days', key: 'sandwichDays', width: 15 },
+      { header: 'Basic Salary', key: 'basic', width: 15 },
+      { header: 'Allowances', key: 'allowances', width: 15 },
+      { header: 'Reimbursements', key: 'reimbursements', width: 15 },
+      { header: 'Gross Salary', key: 'gross', width: 15 },
+      { header: 'PT Deduction', key: 'pt', width: 15 },
+      { header: 'Net Salary', key: 'net', width: 15 },
+    ];
+
+    // --- ADDED MAPPING FOR PROPER SUBTITLE ---
+    const cycleLabels: Record<number, string> = {
+      1: "Dec 21 - Jan 20 (Jan Cycle)",
+      2: "Jan 21 - Feb 20 (Feb Cycle)",
+      3: "Feb 21 - Mar 20 (Mar Cycle)",
+      4: "Mar 21 - Apr 20 (Apr Cycle)",
+      5: "Apr 21 - May 20 (May Cycle)",
+      6: "May 21 - Jun 20 (Jun Cycle)",
+      7: "Jun 21 - Jul 20 (Jul Cycle)",
+      8: "Jul 21 - Aug 20 (Aug Cycle)",
+      9: "Aug 21 - Sep 20 (Sep Cycle)",
+      10: "Sep 21 - Oct 20 (Oct Cycle)",
+      11: "Oct 21 - Nov 20 (Nov Cycle)",
+      12: "Nov 21 - Dec 20 (Dec Cycle)"
+    };
+    const cycleText = cycleLabels[targetMonth] || `Month ${targetMonth}`;
+
+    // 4. Inject Title and Subtitle Rows at the top
+    worksheet.spliceRows(1, 0, []); // Empty row for spacing
+    worksheet.spliceRows(1, 0, [`Payroll Summary: ${cycleText} ${targetYear}`]);
+    worksheet.spliceRows(1, 0, ['PAYROLL SUMMARY REPORT']);
+
+    worksheet.mergeCells('A1:AA1'); // Extended merge to cover the new column (AA)
+    worksheet.mergeCells('A2:AA2');
+
+    // 5. Populate Data Rows and Calculate Totals
+    let totalNetSalary = 0;
+
+    payrolls.forEach((p, index) => {
+      const emp: any = p.employeeId || {};
+      const joiningDateStr = emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString('en-IN') : '—';
+
+      totalNetSalary += p.netSalary || 0;
+
+      // Extract exact Sandwich occurrences from the breakdown array
+      const sandwichCount = p.paidDaysBreakdown?.filter((day: any) => day.type === 'Sandwiched').length || 0;
+
+      worksheet.addRow({
+        srNo: index + 1,
+        empNo: emp.employeeCode || p.employeeCode || '—',
+        empName: emp.name || p.employeeName || '—',
+        designation: emp.position || '—',
+        pan: emp.panNumber || '—',
+        bankName: emp.bankName || '—',
+        accNo: emp.accountNumber || '—',
+        ifsc: emp.ifsc || '—',
+        branch: emp.branch || '—',
+        joiningDate: joiningDateStr,
+        cycleDays: p.totalCycleDays,
+        paidDays: p.paidDays,
+        present: p.presentDays,
+        halfDays: p.halfDays,
+        absent: p.absentDays,
+        paidLeaves: p.paidLeaves,
+        unpaidLeaves: p.unpaidLeaves,
+        compOffs: p.compOffDays,
+        holidays: p.holidays,
+        weekOffs: p.weekOffs,
+        sandwichDays: sandwichCount,
+        basic: p.earnings?.basic || 0,
+        allowances: p.earnings?.allowances || 0,
+        reimbursements: p.earnings?.reimbursements || 0,
+        gross: p.earnings?.totalGross || 0,
+        pt: p.deductions?.professionalTax || 0,
+        net: p.netSalary || 0,
+      });
+    });
+
+    // 6. Add Totals Row
+    const totalRow = worksheet.addRow({
+      srNo: 'Total',
+      net: totalNetSalary
+    });
+
+    // 7. Styling Definitions (Infinity Arthvishva Theme)
+    const fontPrimary = { name: 'Nunito', size: 10 };
+    const fontTitle = { name: 'Nunito', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    const fontHeader = { name: 'Nunito', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+
+    // Title Styling
+    const titleCell = worksheet.getCell('A1');
+    titleCell.font = fontTitle;
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2076C7' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 35;
+
+    // Subtitle Styling
+    const subTitleCell = worksheet.getCell('A2');
+    subTitleCell.font = { name: 'Nunito', size: 11, bold: true, color: { argb: 'FF145087' } };
+    subTitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    subTitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(2).height = 25;
+
+    // Header Styling (Row 4)
+    const headerRow = worksheet.getRow(4);
+    headerRow.height = 30;
+    headerRow.eachCell((cell) => {
+      cell.font = fontHeader;
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF185E9F' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = {
+        top: { style: 'thin' }, bottom: { style: 'medium' },
+        left: { style: 'thin' }, right: { style: 'thin' }
+      };
+    });
+
+    // ─── RULE 1: SMART TEXT ALIGNMENT ───
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 4 && rowNumber !== totalRow.number) {
+        row.eachCell((cell, colNumber) => {
+          cell.font = fontPrimary;
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFF8FAFC' } } };
+
+          if (colNumber >= 11) {
+            // Numbers and Financials -> Right Aligned
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            if (colNumber >= 22) cell.numFmt = '₹#,##0.00';
+          } else if ([1, 2, 5, 8, 10].includes(colNumber)) {
+            // Sr. No, Emp No, PAN, IFSC, Joining Date -> Perfectly Centered
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else {
+            // Names, Designation, Branch -> Left Aligned for readability
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        });
+      }
+    });
+
+    // ─── RULE 2: DYNAMIC COLUMN AUTOFIT (Fixed for TS2722) ───
+    worksheet.columns.forEach((column) => {
+      let maxColumnLength = 0;
+
+      if (column.eachCell) {
+        column.eachCell((cell, rowNumber) => {
+          if (rowNumber >= 4) { // Only calculate from headers down to data rows
+            const formattedValue = cell.numFmt && typeof cell.value === 'number'
+              ? `₹${cell.value.toFixed(2)}` // Account for currency rendering length expansion
+              : cell.value?.toString() || '';
+
+            if (formattedValue.length > maxColumnLength) {
+              maxColumnLength = formattedValue.length;
+            }
+          }
+        });
+      }
+
+      // Apply the width with a safe padding buffer (+ 4 characters)
+      column.width = Math.max(maxColumnLength + 4, 12);
+    });
+
+    // Total Row Styling
+    totalRow.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Nunito', size: 10, bold: true, color: { argb: 'FF1CADA3' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      if (colNumber === 27) {
+        cell.numFmt = '₹#,##0.00';
+        cell.alignment = { horizontal: 'right' };
+      }
+    });
+
+    // 8. Generate Buffer
+    return await workbook.xlsx.writeBuffer() as unknown as Buffer;
+  }
+
 }

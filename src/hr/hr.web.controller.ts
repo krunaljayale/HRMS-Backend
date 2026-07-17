@@ -2,22 +2,21 @@ import {
   BadRequestException,
   Body,
   Controller,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
-  InternalServerErrorException,
-  NotFoundException,
   Param,
   Patch,
   Post,
   Put,
   Query,
   Req,
+  Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { HrService } from './hr.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AttendanceService } from '../attendance/attendance.service';
@@ -432,6 +431,29 @@ export class HrWebController {
     );
   }
 
+  @Get('payroll/export')
+  @UseGuards(JwtAuthGuard)
+  async exportExcel(
+    @Query('targetMonth') targetMonth: string,
+    @Query('targetYear') targetYear: string,
+    @Res() res: Response,
+  ) {
+    const month = parseInt(targetMonth, 10);
+    const year = parseInt(targetYear, 10);
+
+    const buffer = await this.payrollService.exportPayrollToExcel(month, year);
+
+    const fileName = `Payroll_Summary_${month}_${year}.xlsx`;
+
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename=${fileName}`,
+      'Content-Length': buffer.length,
+    });
+
+    res.end(buffer);
+  }
+
   @Get('reimbursement/pending')
   @UseGuards(JwtAuthGuard)
   async getPendingReimbursements() {
@@ -474,6 +496,7 @@ export class HrWebController {
   }
 
   @Get('get-profile')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async getProfile() {
     return await this.hrService.getMasterProfile();
@@ -483,6 +506,7 @@ export class HrWebController {
    * Updates the underlying employee password shared across both profiles
    */
   @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async changePassword(@Body() changePasswordDto: ChangePasswordDto) {
     return await this.hrService.changeMasterPassword(changePasswordDto);

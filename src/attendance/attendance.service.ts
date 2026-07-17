@@ -857,11 +857,24 @@ export class AttendanceService {
 
         const request = record.activeCorrectionRequest!;
 
-        // Now you can safely use it without errors!
+        // 1. Apply requested corrections safely
         if (request.requestedInTime) record.inTime = request.requestedInTime;
         if (request.requestedOutTime) record.outTime = request.requestedOutTime;
         if (request.requestedStatus) record.status = request.requestedStatus;
 
+        // 2. ─── LATE MINUTES CALCULATION MATRIX ───
+        if (record.inTime) {
+            // Dynamically create the 10:00:00 AM buffer limit for the specific historical date
+            // Format: YYYY-MM-DDT10:00:00+05:30 (Forces standard IST time evaluation)
+            const bufferLimit = new Date(`${record.date}T10:00:00+05:30`);
+
+            record.isLate = record.inTime > bufferLimit;
+            record.lateMinutes = record.isLate
+                ? Math.round((record.inTime.getTime() - bufferLimit.getTime()) / 60000)
+                : 0;
+        }
+
+        // 3. ─── DURATION & SHIFT STATUS CALCULATION ───
         if (record.inTime && record.outTime) {
             const diffMs = record.outTime.getTime() - record.inTime.getTime();
             const totalMinutes = Math.floor(diffMs / 60000);
@@ -870,7 +883,6 @@ export class AttendanceService {
             record.totalHours = parseFloat((totalMinutes / 60).toFixed(2));
 
             const rules = await this.systemConfigService.getShiftRulesForDate(record.date);
-
             const isHoliday = false; // Add holiday logic if needed
 
             if (rules.isSunday || isHoliday) {
@@ -892,6 +904,7 @@ export class AttendanceService {
             }
         }
 
+        // 4. Finalize the correction action
         record.correctionStatus = 'Approved';
         record.correctionHistory.push({
             action: 'Approved',
@@ -903,7 +916,7 @@ export class AttendanceService {
 
         await record.save();
 
-        // --- ASYNC NOTIFICATION DISPATCH ---
+        // 5. ─── ASYNC NOTIFICATION DISPATCH ───
         try {
             // Fetch the employee's name and FCM token
             const employee = await this.employeeService.getEmployeeById(record.employeeId.toString(), 'name fcmToken');

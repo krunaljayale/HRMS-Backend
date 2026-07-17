@@ -84,8 +84,10 @@ export class EmployeeService {
     // 3. Assign the RAW new password (The pre-save hook handles the hashing)
     employee.password = newPassword;
 
-    // 4. Save the document
-    await employee.save();
+    // 4. Save the document bypassing full validation checks
+    // This prevents legacy missing fields (like address) from blocking the password change,
+    // but STILL fires your pre('save') hook to hash the new password perfectly.
+    await employee.save({ validateBeforeSave: false });
 
     // 5. Return success response
     return {
@@ -743,6 +745,16 @@ export class EmployeeService {
       ...(uploadedUrls.medicalDocument && { medicalDocumentUrl: uploadedUrls.medicalDocument }),
     };
 
+    // FIX 1: Manually hash the password if it is being updated, as findByIdAndUpdate bypasses pre('save') hooks
+    if (sanitizedData.password) {
+      sanitizedData.password = await bcrypt.hash(sanitizedData.password, 12);
+    }
+
+    // Clean up frontend validation fields so they don't get forced into the DB schema
+    if (sanitizedData.confirmPassword !== undefined) {
+      delete sanitizedData.confirmPassword;
+    }
+
     // Remove empty/undefined properties to prevent overwriting existing DB data with nulls
     Object.keys(sanitizedData).forEach((key) => {
       if (sanitizedData[key] === undefined || sanitizedData[key] === '') {
@@ -755,10 +767,13 @@ export class EmployeeService {
       const updatedEmployee = await this.employeeModel.findByIdAndUpdate(
         id,
         { $set: sanitizedData },
-        { new: true, runValidators: true }
+        // FIX 2: Swapped { new: true } for { returnDocument: 'after' } to clear deprecation warning
+        { returnDocument: 'after', runValidators: true }
       );
+
       if (!updatedEmployee) throw new NotFoundException('Employee not found');
       return updatedEmployee;
+
     } catch (dbError: any) {
       console.error('Update failed:', dbError);
       throw new BadRequestException(`Database update failed: ${dbError.message}`);

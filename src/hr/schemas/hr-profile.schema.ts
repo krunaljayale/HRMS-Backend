@@ -13,10 +13,15 @@ export class HrProfile {
 
     @Prop({ default: true })
     isActive!: boolean;
+
+    // ── TYPE HINTS FOR TYPESCRIPT COMPILER ──
+    // Declaring these lets TS know they exist on instances of HrProfileDocument
+    // without interfering with Mongoose's runtime automatic timestamp generation.
+    createdAt!: Date;
+    updatedAt!: Date;
 }
 
 export const HrProfileSchema = SchemaFactory.createForClass(HrProfile);
-
 
 HrProfileSchema.pre('save', async function () {
     if (this.isNew) {
@@ -24,7 +29,6 @@ HrProfileSchema.pre('save', async function () {
         const count = await (this.constructor as any).countDocuments();
 
         if (count >= 1) {
-            // 2. Simply throw the error instead of returning next(Error)
             throw new Error('SYSTEM_LOCKED: Only one HR Profile is allowed in the entire system.');
         }
     }

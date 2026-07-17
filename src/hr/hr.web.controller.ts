@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   InternalServerErrorException,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -30,6 +31,7 @@ import { GetPayrollListQueryDto } from '../payroll/dto/get-payroll-list.dto';
 import { PayrollService } from '../payroll/payroll.service';
 import { ProcessAllActivePayrollDto } from '../payroll/dto/process-all-active-payroll.dto';
 import { ReimbursementService } from '../reimbursement/reimbursement.service';
+import { ChangePasswordDto } from '../employee/dto/change-password.dto';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -466,9 +468,27 @@ export class HrWebController {
   }
 
   @Get('reimbursement/historical')
+  @UseGuards(JwtAuthGuard)
   async getHistoricalReimbursements() {
     return await this.reimbursementService.getHistoricalClaimsForHr();
   }
+
+  @Get('get-profile')
+  @HttpCode(HttpStatus.OK)
+  async getProfile() {
+    return await this.hrService.getMasterProfile();
+  }
+
+  /**
+   * Updates the underlying employee password shared across both profiles
+   */
+  @Patch('change-password')
+  @HttpCode(HttpStatus.OK)
+  async changePassword(@Body() changePasswordDto: ChangePasswordDto) {
+    return await this.hrService.changeMasterPassword(changePasswordDto);
+  }
+
+
 
 
 }

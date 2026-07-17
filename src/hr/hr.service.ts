@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { HrProfile, HrProfileDocument } from './schemas/hr-profile.schema';
@@ -6,6 +6,7 @@ import { EmployeeService } from '../employee/employee.service';
 import * as bcrypt from 'bcrypt';
 import { AttendanceService } from '../attendance/attendance.service';
 import { LeaveService } from '../leave/leave.service';
+import { ChangePasswordDto } from '../employee/dto/change-password.dto';
 
 @Injectable()
 export class HrService {
@@ -15,6 +16,54 @@ export class HrService {
         private attendanceService: AttendanceService,
         private readonly leaveService: LeaveService,
     ) { }
+
+    private async getRawMasterProfile(): Promise<HrProfileDocument> {
+        const hrProfile = await this.hrProfileModel.findOne({ isActive: true }).exec();
+        if (!hrProfile) {
+            throw new NotFoundException('SYSTEM_ERROR: Active Master HR Profile configuration not found.');
+        }
+        return hrProfile;
+    }
+
+    async getMasterProfile(): Promise<any> {
+        const hrProfile = await this.getRawMasterProfile();
+
+        // Strict non-sensitive selection parameters to maintain corporate privacy protocols
+        const selectFields = 'name employeeCode email department position status';
+
+        // Call your existing method safely
+        const employeeData = await this.employeeService.getEmployeeById(
+            hrProfile.employeeId.toString(),
+            selectFields
+        );
+
+        return {
+            idCode: hrProfile.idCode,
+            isActive: hrProfile.isActive,
+            createdAt: hrProfile.createdAt,
+            updatedAt: hrProfile.updatedAt,
+            employeeAccount: {
+                _id: employeeData._id,
+                name: employeeData.name,
+                employeeCode: employeeData.employeeCode,
+                email: employeeData.email,
+                department: employeeData.department,
+                position: employeeData.position,
+                status: employeeData.status,
+                role: employeeData.role,
+            }
+        }
+    }
+
+    async changeMasterPassword(changePasswordDto: ChangePasswordDto) {
+        const hrProfile = await this.getRawMasterProfile();
+
+        // Pass validation directly down to the pre-existing EmployeeService sequence
+        return await this.employeeService.updatePassword(
+            hrProfile.employeeId.toString(),
+            changePasswordDto
+        );
+    }
 
     async createSingleHrProfile(employeeId: string, idCode: string) {
         // 1. Check if ANY profile already exists before trying to create one

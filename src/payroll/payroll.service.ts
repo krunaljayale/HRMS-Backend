@@ -21,6 +21,9 @@ import {
 import { GetPayrollListQueryDto } from './dto/get-payroll-list.dto';
 import { ReimbursementService } from '../reimbursement/reimbursement.service';
 import * as ExcelJS from 'exceljs';
+import * as puppeteer from 'puppeteer';
+import * as hbs from 'handlebars';
+import { ToWords } from 'to-words';
 
 @Injectable()
 export class PayrollService {
@@ -888,6 +891,243 @@ export class PayrollService {
 
     // 8. Generate Buffer
     return await workbook.xlsx.writeBuffer() as unknown as Buffer;
+  }
+
+  async generateSalarySlipPdf(payrollId: string, employeeId: string): Promise<Buffer> {
+    // 1. Fetch the exact same structured data you already built
+    const payroll: any = await this.getHistoricalPayrollDetails(payrollId, employeeId);
+
+    // 2. Setup Number to Words converter for Indian Rupees
+    const toWords = new ToWords({
+      localeCode: 'en-IN',
+      converterOptions: {
+        currency: true,
+        ignoreDecimal: false,
+        ignoreZeroCurrency: false,
+        doNotAddOnly: false,
+      },
+    });
+
+    // 3. Prepare display variables & assets
+    const amountInWords = toWords.convert(payroll.netSalary);
+    const emp = payroll.employeeId || {};
+
+    // --> YOUR CLOUDINARY ASSET URL <--
+    const brandImageUrl = "https://res.cloudinary.com/diyxmoyuj/image/upload/v1783577195/new_hrms_employees_data/IA11111/vka3akbv5jkdjajxjxwm.png";
+
+    // Calculate sandwich days
+    const sandwichCount = payroll.paidDaysBreakdown?.filter((d: any) => d.type === 'Sandwiched').length || 0;
+
+    // Formatting helpers
+    const joiningDateStr = emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString('en-IN') : '—';
+    const cycleLabels: Record<number, string> = {
+      1: "Dec 21 - Jan 20 (Jan Cycle)", 2: "Jan 21 - Feb 20 (Feb Cycle)", 3: "Feb 21 - Mar 20 (Mar Cycle)",
+      4: "Mar 21 - Apr 20 (Apr Cycle)", 5: "Apr 21 - May 20 (May Cycle)", 6: "May 21 - Jun 20 (Jun Cycle)",
+      7: "Jun 21 - Jul 20 (Jul Cycle)", 8: "Jul 21 - Aug 20 (Aug Cycle)", 9: "Aug 21 - Sep 20 (Sep Cycle)",
+      10: "Sep 21 - Oct 20 (Oct Cycle)", 11: "Oct 21 - Nov 20 (Nov Cycle)", 12: "Nov 21 - Dec 20 (Dec Cycle)"
+    };
+    const cycleText = cycleLabels[payroll.month] || `Month ${payroll.month}`;
+    const totalEarnings = payroll.earnings?.totalGross || 0;
+    const totalDeductions = payroll.deductions?.totalDeductions || 0;
+
+    // 4. The HTML Template (Using Infinity Arthvishva Theme + Watermark + Logo)
+    const htmlTemplate = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body { 
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+                padding: 40px; 
+                color: #333; 
+                position: relative; /* Required for the absolute watermark */
+            }
+            
+            /* --- WATERMARK CSS --- */
+            .watermark {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 60%; /* Adjust this to make the watermark larger/smaller */
+                opacity: 0.08; /* Extremely light so text is readable */
+                z-index: -1;
+                pointer-events: none;
+            }
+
+            /* --- HEADER & LOGO CSS --- */
+            .header { 
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                border-bottom: 2px solid #2076C7; 
+                padding-bottom: 20px; 
+                margin-bottom: 20px; 
+            }
+            .header-content {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .logo-img {
+                height: 50px; /* Adjust based on your preferred header size */
+                width: auto;
+            }
+            .header-text {
+                display: flex;
+                flex-direction: column;
+            }
+            .logo-text { font-size: 28px; font-weight: bold; color: #2076C7; margin: 0; }
+            .sub-logo { font-size: 14px; color: #185E9F; letter-spacing: 1px; }
+            
+            /* --- EXISTING CSS --- */
+            .payslip-title { font-size: 16px; font-weight: bold; background-color: #F8FAFC; padding: 10px; text-align: center; border-radius: 4px; border: 1px solid #E2E8F0; margin-bottom: 20px; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; font-size: 13px; }
+            .grid-item span { font-weight: bold; display: inline-block; width: 120px; color: #145087; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
+            th, td { border: 1px solid #CBD5E1; padding: 10px; text-align: left; }
+            th { background-color: #2076C7; color: white; font-weight: bold; }
+            .text-right { text-align: right; }
+            .totals-row td { font-weight: bold; background-color: #F8FAFC; }
+            .net-pay-box { border: 2px solid #1CADA3; padding: 15px; margin-top: 20px; border-radius: 6px; }
+            .net-pay-box h3 { margin: 0 0 10px 0; color: #158C84; }
+            .footer { margin-top: 40px; font-size: 11px; color: #64748B; text-align: center; border-top: 1px solid #E2E8F0; padding-top: 10px; }
+            .note { font-style: italic; color: #EF4444; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <!-- INJECTED WATERMARK -->
+        <img src="${brandImageUrl}" class="watermark" />
+
+        <div class="header">
+            <div class="header-content">
+                <!-- INJECTED LOGO -->
+                <img src="${brandImageUrl}" class="logo-img" alt="Infinity Arthvishva Logo" />
+                <div class="header-text">
+                    <h1 class="logo-text">Infinity Arthvishva</h1>
+                    <div class="sub-logo">HUMAN RESOURCE MANAGEMENT SYSTEM</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="payslip-title">
+            PAYSLIP FOR CYCLE: ${cycleText.toUpperCase()} ${payroll.year}
+        </div>
+
+        <div class="grid-2">
+            <div class="grid-item"><span>Employee Name:</span> ${emp.name || '—'}</div>
+            <div class="grid-item"><span>Employee ID:</span> ${emp.employeeCode || '—'}</div>
+            <div class="grid-item"><span>Designation:</span> ${emp.position || '—'}</div>
+            <div class="grid-item"><span>Department:</span> ${emp.department || '—'}</div>
+            <div class="grid-item"><span>Joining Date:</span> ${joiningDateStr}</div>
+            <div class="grid-item"><span>PAN:</span> ${emp.panNumber || '—'}</div>
+            <div class="grid-item"><span>Bank Name:</span> ${emp.bankName || '—'}</div>
+            <div class="grid-item"><span>Account No:</span> ${emp.accountNumber || '—'}</div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Total Days</th>
+                    <th>Paid Days</th>
+                    <th>Present</th>
+                    <th>Half Days</th>
+                    <th>Leaves/Hols</th>
+                    <th>Absent/LWP</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>${payroll.totalCycleDays}</td>
+                    <td>${payroll.paidDays}</td>
+                    <td>${payroll.presentDays}</td>
+                    <td>${payroll.halfDays}</td>
+                    <td>${payroll.paidLeaves + payroll.holidays + payroll.weekOffs}</td>
+                    <td>${payroll.absentDays}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 35%">EARNINGS</th>
+                    <th style="width: 15%" class="text-right">AMOUNT (INR)</th>
+                    <th style="width: 35%">DEDUCTIONS</th>
+                    <th style="width: 15%" class="text-right">AMOUNT (INR)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Basic Salary</td>
+                    <td class="text-right">${payroll.earnings?.basic?.toFixed(2) || '0.00'}</td>
+                    <td>Professional Tax</td>
+                    <td class="text-right">${payroll.deductions?.professionalTax?.toFixed(2) || '0.00'}</td>
+                </tr>
+                <tr>
+                    <td>Allowances</td>
+                    <td class="text-right">${payroll.earnings?.allowances?.toFixed(2) || '0.00'}</td>
+                    <td>TDS</td>
+                    <td class="text-right">${payroll.deductions?.taxDeductedAtSource?.toFixed(2) || '0.00'}</td>
+                </tr>
+                <tr>
+                    <td>Reimbursements</td>
+                    <td class="text-right">${payroll.earnings?.reimbursements?.toFixed(2) || '0.00'}</td>
+                    <td>Other Deductions</td>
+                    <td class="text-right">${payroll.deductions?.other?.toFixed(2) || '0.00'}</td>
+                </tr>
+                <tr class="totals-row">
+                    <td>Total Earnings</td>
+                    <td class="text-right">${totalEarnings.toFixed(2)}</td>
+                    <td>Total Deductions</td>
+                    <td class="text-right">${totalDeductions.toFixed(2)}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="net-pay-box">
+            <h3 style="display: flex; justify-content: space-between;">
+                <span>Net Amount Payable:</span> 
+                <span>INR ${payroll.netSalary.toFixed(2)}</span>
+            </h3>
+            <div><strong>Amount In Words:</strong> ${amountInWords}</div>
+        </div>
+
+        ${sandwichCount > 0 ? `<p class="note">Note: ${sandwichCount} day(s) of Sandwich Leave Deduction applied in this cycle.</p>` : ''}
+
+        <div class="footer">
+            This is a computer-generated document and does not require a physical signature.
+        </div>
+    </body>
+    </html>
+    `;
+
+    // 5. Compile with Handlebars 
+    const template = hbs.compile(htmlTemplate);
+    const finalHtml = template({});
+
+    // 6. Launch Puppeteer and Generate PDF
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+
+    // Inject HTML and wait for fonts/DOM/images to load
+    await page.setContent(finalHtml, { waitUntil: 'load' });
+
+    // Snap PDF
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' }
+    });
+
+    await browser.close();
+
+    return pdfBuffer as unknown as Buffer;
   }
 
 }

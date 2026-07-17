@@ -454,6 +454,33 @@ export class HrWebController {
     res.end(buffer);
   }
 
+  @Get('payroll/salary-slip/:id')
+  async downloadSalarySlip(
+    @Param('id') payrollId: string,
+    @Query('employeeId') targetEmployeeId: string,
+    @Res() res: Response,
+  ) {
+    if (!targetEmployeeId) {
+      // Add a quick safety check
+      throw new BadRequestException('Target employee ID is required');
+    }
+
+    
+
+    // Now it uses the specific employee's ID, not the HR admin's ID
+    const pdfBuffer = await this.payrollService.generateSalarySlipPdf(payrollId, targetEmployeeId);
+
+    const fileName = `SalarySlip_${payrollId}.pdf`;
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Length': pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
+  }
+
   @Get('reimbursement/pending')
   @UseGuards(JwtAuthGuard)
   async getPendingReimbursements() {

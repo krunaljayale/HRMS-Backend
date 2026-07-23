@@ -313,24 +313,39 @@ export class LeaveService {
         leave.markModified('workflowSteps');
         await leave.save();
 
-        // ... (Keep your FCM Notification logic here)
-
+        // --- DYNAMIC FCM NOTIFICATION ---
         const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
 
         if (employee && employee.fcmToken) {
-            // We don't await this because we don't want the HTTP response 
-            // to wait for Firebase to finish routing the notification.
+            // Determine the current state to format the correct message
+            const isFullyApproved = leave.overallStatus === 'Approved';
+
+            let notificationTitle = '';
+            let notificationBody = '';
+
+            if (isFullyApproved) {
+                // The workflow is completely finished
+                notificationTitle = "Leave Fully Approved ✅";
+                notificationBody = `Hi ${employee.name}, your ${leave.leaveCategory} leave request has received final approval from ${actingProfile}.`;
+            } else {
+                // The workflow moved forward, but isn't done yet
+                notificationTitle = "Leave Step Approved ⏳";
+                notificationBody = `Hi ${employee.name}, your ${leave.leaveCategory} leave was approved by ${actingProfile}. It is now waiting for the next step.`;
+            }
+
+            // Fire and forget
             this.notificationService.sendToEmployee({
                 token: employee.fcmToken,
-                title: "Leave Approved ✅",
-                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been approved by HR.`,
+                title: notificationTitle,
+                body: notificationBody,
                 data: {
                     type: "LEAVE_UPDATE",
                     leaveId: leave._id.toString(),
-                    status: "Approved"
+                    status: leave.overallStatus,
                 }
             }).catch(e => console.error("FCM Async Error:", e));
         }
+
         return leave;
     }
 
@@ -362,7 +377,7 @@ export class LeaveService {
 
         leave.overallStatus = 'Rejected';
 
-        // 💰 REFUND THE TOKENS TO THE VAULT (Added 'Locked' safety check)
+        //  REFUND THE TOKENS TO THE VAULT 
         if (leave.consumedLedgerIds && leave.consumedLedgerIds.length > 0) {
             await this.leaveLedgerModel.updateMany(
                 { _id: { $in: leave.consumedLedgerIds }, status: 'Locked' },
@@ -377,13 +392,16 @@ export class LeaveService {
         const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
 
         if (employee && employee.fcmToken) {
+            // Format the remark to append to the notification if it exists
+            const remarkText = remarks ? ` Reason: "${remarks}"` : '';
+
             // We don't await this because we don't want the HTTP response 
             // to wait for Firebase to finish routing the notification.
             this.notificationService.sendToEmployee({
                 token: employee.fcmToken,
                 title: "Leave Rejected ❌",
-                // Dynamically tell them who rejected it (Manager, HR, or Director)
-                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request has been rejected by ${actingProfile}.`,
+                // Dynamically state who rejected it and why
+                body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request was rejected by ${actingProfile}.${remarkText}`,
                 data: {
                     type: "LEAVE_UPDATE",
                     leaveId: leave._id.toString(),
@@ -515,6 +533,77 @@ export class LeaveService {
         };
     }
     // ─────────────────────────────────────── HR SEVICES END ──────────────────────────────────────────
+
+
+    // ─────────────────────────────────────── Director SEVICES START ──────────────────────────────────────────
+
+    async getPendingLeavesForDirector() {
+        const pipeline: PipelineStage[] = [
+            // Step 1: Only look at leaves that are still globally Pending
+            { $match: { overallStatus: 'Pending' } },
+
+            // Step 2: The Magic Array Filter for Director
+            // Ensures the workflow is currently waiting on the Director
+            {
+                $match: {
+                    $expr: {
+                        $let: {
+                            vars: {
+                                currentStep: { $arrayElemAt: ['$workflowSteps', '$currentStepIndex'] }
+                            },
+                            in: {
+                                $and: [
+                                    // NOTE: Adjust 'isDirectorProfileStep' if your boolean flag is named differently
+                                    // e.g., { $eq: ['$$currentStep.role', 'Director'] }
+                                    { $eq: ['$$currentStep.isDirectorProfileStep', true] },
+                                    { $eq: ['$$currentStep.status', 'Pending'] }
+                                ]
+                            }
+                        }
+                    }
+                }
+            },
+
+            // Step 3: Lookup Employee Data
+            {
+                $lookup: {
+                    from: 'employees', // Must match your actual Employee collection name
+                    localField: 'employeeId',
+                    foreignField: '_id',
+                    as: 'employeeData'
+                }
+            },
+            { $unwind: { path: '$employeeData', preserveNullAndEmptyArrays: true } },
+
+            // Step 4: Sort (Oldest requests first)
+            { $sort: { createdAt: 1 } },
+
+            // Step 5: Format to match the Frontend `PendingLeaveItem` Interface exactly
+            {
+                $project: {
+                    _id: 0,
+                    leaveId: '$_id',
+                    employeeName: { $ifNull: ['$employeeData.name', 'Unknown Employee'] },
+                    employeeCode: { $ifNull: ['$employeeData.employeeCode', 'N/A'] },
+                    department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
+                    avatar: { $ifNull: ['$employeeData.profileImageUrl', ''] },
+                    leaveCategory: 1,
+                    startDate: 1,
+                    endDate: 1,
+                    totalDays: 1,
+                    isHalfDay: 1,
+                    halfDayPeriod: 1,
+                    reason: 1,
+                    appliedOn: '$createdAt'
+                }
+            }
+        ];
+
+        return await this.leaveHistoryModel.aggregate(pipeline).exec();
+    }
+
+
+    // ─────────────────────────────────────── Director SEVICES END ──────────────────────────────────────────
 
 
     // LEDGER CREATION & RETRIEVAL ──

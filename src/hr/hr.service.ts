@@ -1,11 +1,9 @@
-import { Injectable, ConflictException, UnauthorizedException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { HrProfile, HrProfileDocument } from './schemas/hr-profile.schema';
 import { EmployeeService } from '../employee/employee.service';
 import * as bcrypt from 'bcrypt';
-import { AttendanceService } from '../attendance/attendance.service';
-import { LeaveService } from '../leave/leave.service';
 import { ChangePasswordDto } from '../employee/dto/change-password.dto';
 
 @Injectable()
@@ -13,8 +11,6 @@ export class HrService {
     constructor(
         @InjectModel(HrProfile.name) private hrProfileModel: Model<HrProfileDocument>,
         private employeeService: EmployeeService,
-        private attendanceService: AttendanceService,
-        private readonly leaveService: LeaveService,
     ) { }
 
     private async getRawMasterProfile(): Promise<HrProfileDocument> {
@@ -116,41 +112,5 @@ export class HrService {
         return hr;
     }
 
-    async getGeneralStats() {
-        try {
-            // 1. Fetch metrics in parallel
-            const [totalEmployees, totalPresent, totalOnLeave] = await Promise.all([
-                this.employeeService.countAllEmployees(),
-                this.attendanceService.getTodayPresentCount(),
-                this.leaveService.getTodayApprovedLeavesCount(),
-            ]);
-
-            // 2. Real-time Math calculation for Absentees
-            // An employee is absent if they are Active, but not Present, and not on an Approved Leave.
-            const calculatedAbsent = totalEmployees - totalPresent - totalOnLeave;
-            const finalAbsent = calculatedAbsent > 0 ? calculatedAbsent : 0; // Safeguard against negative numbers
-
-            return [
-                {
-                    title: 'Total Employees',
-                    value: String(totalEmployees || 0),
-                },
-                {
-                    title: 'Today Present',
-                    value: String(totalPresent || 0),
-                },
-                {
-                    title: 'Today Absent',
-                    value: String(finalAbsent),
-                },
-                {
-                    title: 'Today Leave',
-                    value: String(totalOnLeave || 0),
-                },
-            ];
-        } catch (error) {
-            console.error('Failed to aggregate general stats:', error);
-            throw new InternalServerErrorException('Failed to retrieve dashboard statistics');
-        }
-    }
+    
 }

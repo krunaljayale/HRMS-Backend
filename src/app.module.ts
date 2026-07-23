@@ -18,6 +18,8 @@ import { HrModule } from './hr/hr.module';
 import { NotificationsModule } from './notification/notification.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReimbursementModule } from './reimbursement/reimbursement.module';
+import { DirectorModule } from './director/director.module';
+import { ManagementModule } from './management/management.module';
 
 @Module({
   imports: [
@@ -65,6 +67,10 @@ import { ReimbursementModule } from './reimbursement/reimbursement.module';
     CloudinaryModule,
 
     ReimbursementModule,
+
+    DirectorModule,
+
+    ManagementModule,
   ],
   controllers: [AppController],
   providers: [AppService],

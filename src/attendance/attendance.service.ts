@@ -15,11 +15,6 @@ import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class AttendanceService {
-    // Office configurations (can be moved to @nestjs/config later)
-    private readonly OFFICE_LAT = 18.5339582;
-    private readonly OFFICE_LON = 73.839535;
-    private readonly GEOFENCE_RADIUS_METERS = 50;
-
     constructor(
         @InjectModel('Attendance') private attendanceModel: Model<AttendanceDocument>,
         private holidayService: HolidayService,
@@ -27,9 +22,10 @@ export class AttendanceService {
         private leaveService: LeaveService,
         private readonly notificationService: NotificationService,
         private readonly systemConfigService: SystemConfigService,
+
     ) { }
 
-    private validateLocation(
+    private async validateLocation(
         latitude: number | undefined,
         longitude: number | undefined,
         workMode: string,
@@ -40,10 +36,19 @@ export class AttendanceService {
                 throw new BadRequestException('Location coordinates are required for Office punch.');
             }
 
-            const distance = getDistanceInMeters(this.OFFICE_LAT, this.OFFICE_LON, latitude, longitude);
-            if (distance > this.GEOFENCE_RADIUS_METERS) {
+            // Fetch dynamic coordinates and radius from MongoDB
+            const config = await this.systemConfigService.getActiveConfig();
+
+            const distance = getDistanceInMeters(
+                config.office_lat,
+                config.office_lon,
+                latitude,
+                longitude
+            );
+
+            if (distance > config.radius_meters) {
                 throw new BadRequestException(
-                    `Outside office premises (${Math.round(distance)}m away). Must be within ${this.GEOFENCE_RADIUS_METERS}m.`,
+                    `Outside office premises (${Math.round(distance)}m away). Must be within ${config.radius_meters}m.`,
                 );
             }
         }
@@ -84,7 +89,7 @@ export class AttendanceService {
             const dateString = getIST('date');
 
             const fullEmployee = await this.employeeService.getEmployeeById(jwtPayload.employeeId, 'employeeCode name _id');
-            this.validateLocation(dto.latitude, dto.longitude, dto.workMode);
+            await this.validateLocation(dto.latitude, dto.longitude, dto.workMode);
 
             // 2. Check for existing record
             const existing = await this.attendanceModel.findOne({
@@ -164,7 +169,7 @@ export class AttendanceService {
             if (attendance.outTime) throw new BadRequestException('Already checked out today.');
 
             // 6. Geo Validation
-            this.validateLocation(dto.latitude, dto.longitude, attendance.workMode);
+            await this.validateLocation(dto.latitude, dto.longitude, attendance.workMode);
 
             // 7. Calculate Worked Hours mathematically
             const workedMs = now.getTime() - attendance.inTime.getTime();
@@ -386,10 +391,90 @@ export class AttendanceService {
     }
 
     // ── ATTENDANCE CALENDAR / HISTORY ──
+    // async getMonthlyAttendanceList(employeeId: string, year: string, month: string) {
+    //     const formattedMonth = month.padStart(2, '0');
+    //     const monthPrefix = `${year}-${formattedMonth}`;
+    //     const todayStr = getIST('date');
+    //     const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
+
+    //     // 1. Fetch Attendance Records
+    //     const dbRecords = await this.attendanceModel.find({
+    //         employeeId: new Types.ObjectId(employeeId),
+    //         date: { $regex: `^${monthPrefix}` }
+    //     }).lean();
+
+    //     const recordMap = new Map();
+    //     dbRecords.forEach(r => recordMap.set(r.date, r));
+
+    //     //  2. Fetch Holidays via HolidayService
+    //     const holidays = await this.holidayService.findHolidaysByMonth(Number(year), Number(month));
+
+    //     const holidayMap = new Map();
+    //     holidays.forEach(h => {
+    //         // Convert native Date to "YYYY-MM-DD" string so it matches our loop
+    //         const hDate = new Date(h.date);
+    //         const dateStr = `${hDate.getUTCFullYear()}-${String(hDate.getUTCMonth() + 1).padStart(2, '0')}-${String(hDate.getUTCDate()).padStart(2, '0')}`;
+    //         holidayMap.set(dateStr, h);
+    //     });
+
+    //     const summary = { present: 0, absent: 0, halfDay: 0, weekOffHoliday: 0 };
+    //     const dailyList: any[] = [];
+
+    //     // 3. The Gap-Filling Loop
+    //     for (let i = 1; i <= daysInMonth; i++) {
+    //         const dateStr = `${year}-${formattedMonth}-${String(i).padStart(2, '0')}`;
+    //         const jsDate = new Date(Number(year), Number(month) - 1, i);
+    //         const isSunday = jsDate.getDay() === 0;
+
+    //         const myRecord = recordMap.get(dateStr);
+    //         const holidayRecord = holidayMap.get(dateStr);
+    //         const isFutureDate = dateStr > todayStr;
+
+    //         const dayData = {
+    //             date: dateStr,
+    //             myAttendance: myRecord || null,
+    //             sharedReports: [],
+    //             status: 'A',
+    //             isWeekOff: isSunday,
+    //             holiday: holidayRecord || null
+    //         };
+
+    //         // ── The Priority Logic ──
+    //         if (myRecord && (myRecord.inTime || (myRecord.status && !['A', 'H'].includes(myRecord.status)))) {
+    //             dayData.status = myRecord.status || 'P';
+
+    //             if (dayData.status === 'P') summary.present++;
+    //             if (dayData.status === 'Half') summary.halfDay++;
+    //         }
+    //         else if (holidayRecord) {
+    //             dayData.status = 'H';
+    //             summary.weekOffHoliday++;
+    //         }
+    //         else if (isSunday) {
+    //             dayData.status = 'WO';
+    //             summary.weekOffHoliday++;
+    //         }
+    //         else if (isFutureDate) {
+    //             dayData.status = 'Pending';
+    //         }
+    //         else {
+    //             dayData.status = 'A';
+    //             summary.absent++;
+    //         }
+
+    //         dailyList.push(dayData);
+    //     }
+
+    //     return {
+    //         summary,
+    //         records: dailyList
+    //     };
+    // }
+
     async getMonthlyAttendanceList(employeeId: string, year: string, month: string) {
         const formattedMonth = month.padStart(2, '0');
         const monthPrefix = `${year}-${formattedMonth}`;
-        const todayStr = getIST('date');
+        const todayStr = getIST('date'); // Assuming this returns 'YYYY-MM-DD'
         const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
 
         // 1. Fetch Attendance Records
@@ -401,21 +486,41 @@ export class AttendanceService {
         const recordMap = new Map();
         dbRecords.forEach(r => recordMap.set(r.date, r));
 
-        //  2. Fetch Holidays via HolidayService
+        // 2. Fetch Holidays via HolidayService
         const holidays = await this.holidayService.findHolidaysByMonth(Number(year), Number(month));
 
         const holidayMap = new Map();
         holidays.forEach(h => {
-            // Convert native Date to "YYYY-MM-DD" string so it matches our loop
             const hDate = new Date(h.date);
             const dateStr = `${hDate.getUTCFullYear()}-${String(hDate.getUTCMonth() + 1).padStart(2, '0')}-${String(hDate.getUTCDate()).padStart(2, '0')}`;
             holidayMap.set(dateStr, h);
         });
 
-        const summary = { present: 0, absent: 0, halfDay: 0, weekOffHoliday: 0 };
+        // 3. Fetch Leaves via LeaveService (Passing a high limit to ensure we capture relevant data)
+        const leaveData = await this.leaveService.getEmployeeLeaveHistory(employeeId, 1000);
+        const leaveMap = new Map();
+
+        // Map out every individual day an employee is on an approved leave
+        leaveData.leaves.forEach((leave: any) => {
+            if (leave.overallStatus === 'Approved') {
+                // Note: Change 'startDate' and 'endDate' to match your actual schema fields (e.g. fromDate/toDate)
+                const start = new Date(leave.startDate);
+                const end = new Date(leave.endDate);
+
+                let current = new Date(start);
+                while (current <= end) {
+                    const lDateStr = `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, '0')}-${String(current.getUTCDate()).padStart(2, '0')}`;
+                    leaveMap.set(lDateStr, leave);
+                    current.setDate(current.getDate() + 1);
+                }
+            }
+        });
+
+        // Added 'leave: 0' to the summary object
+        const summary = { present: 0, absent: 0, halfDay: 0, weekOffHoliday: 0, leave: 0 };
         const dailyList: any[] = [];
 
-        // 3. The Gap-Filling Loop
+        // 4. The Gap-Filling Loop
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = `${year}-${formattedMonth}-${String(i).padStart(2, '0')}`;
             const jsDate = new Date(Number(year), Number(month) - 1, i);
@@ -423,6 +528,7 @@ export class AttendanceService {
 
             const myRecord = recordMap.get(dateStr);
             const holidayRecord = holidayMap.get(dateStr);
+            const leaveRecord = leaveMap.get(dateStr);
             const isFutureDate = dateStr > todayStr;
 
             const dayData = {
@@ -431,7 +537,8 @@ export class AttendanceService {
                 sharedReports: [],
                 status: 'A',
                 isWeekOff: isSunday,
-                holiday: holidayRecord || null
+                holiday: holidayRecord || null,
+                leave: leaveRecord || null
             };
 
             // ── The Priority Logic ──
@@ -450,7 +557,13 @@ export class AttendanceService {
                 summary.weekOffHoliday++;
             }
             else if (isFutureDate) {
+                // Future dates default to Pending. This prevents upcoming leaves from showing as "L" yet.
                 dayData.status = 'Pending';
+            }
+            else if (leaveRecord) {
+                // If it's a past date and a leave document exists
+                dayData.status = 'L';
+                summary.leave++;
             }
             else {
                 dayData.status = 'A';
@@ -608,66 +721,96 @@ export class AttendanceService {
    */
     async getAggregateAttendanceStats(viewMode: 'monthly' | 'yearly') {
         try {
-            const currentFullIST = getIST('full'); // "2026-06-19 14:46:14"
-            const currentYear = currentFullIST.split('-')[0]; // "2026"
+            const currentFullIST = getIST('full');
+            const currentYear = currentFullIST.split('-')[0];
 
-            // 1. Change type from 'string' to 'any' so it can accept both strings and aggregation objects
             let matchQuery: any = {};
             let groupFormat: any = '';
 
             if (viewMode === 'monthly') {
-                // Filter records only for the current calendar year to keep data relevant
                 matchQuery = { date: new RegExp(`^${currentYear}-`) };
-
-                // This is an object expression expression, which requires type 'any'
                 groupFormat = { $substr: ['$date', 5, 2] };
             } else {
-                // Extracting the year part
                 groupFormat = { $substr: ['$date', 0, 4] };
             }
 
-            // 2. Pass it directly into the pipeline
             const rawAggregatedData = await this.attendanceModel.aggregate([
                 { $match: matchQuery },
                 {
                     $group: {
-                        _id: groupFormat, // Works perfectly now!
+                        _id: groupFormat,
                         presentDays: {
-                            $sum: { $cond: [{ $eq: ['$status', 'P'] }, 1, 0] },
+                            $sum: {
+                                $switch: {
+                                    branches: [
+                                        { case: { $in: ['$status', ['P', 'CompOff']] }, then: 1 },
+                                        { case: { $in: ['$status', ['Half', 'HalfCompOff']] }, then: 0.5 }
+                                    ],
+                                    default: 0
+                                }
+                            }
                         },
                         absentDays: {
-                            $sum: { $cond: [{ $eq: ['$status', 'A'] }, 1, 0] },
+                            $sum: {
+                                $switch: {
+                                    branches: [
+                                        { case: { $eq: ['$status', 'A'] }, then: 1 },
+                                        { case: { $in: ['$status', ['Half', 'HalfCompOff']] }, then: 0.5 }
+                                    ],
+                                    default: 0
+                                }
+                            }
                         },
                     },
                 },
                 { $sort: { _id: 1 } },
             ]);
 
-            // 3. Normalize and map to match your exact frontend structural types
             const monthsArray = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-            const processedStats = rawAggregatedData.map((bucket) => {
-                const present = bucket.presentDays || 0;
-                const absent = bucket.absentDays || 0;
-                const totalExpectedDays = present + absent;
+            // 1. UPDATED: Explicitly allow the value to be null in the type definition
+            let processedStats: { label: string; value: number | null }[] = [];
 
-                // Calculate rate. If no records exist, fallback to 0%
-                const attendanceRate = totalExpectedDays > 0
-                    ? Math.round((present / totalExpectedDays) * 100)
-                    : 0;
+            if (viewMode === 'monthly') {
+                processedStats = monthsArray.map((monthName, index) => {
+                    const monthKey = String(index + 1).padStart(2, '0');
+                    const bucket = rawAggregatedData.find(d => d._id === monthKey);
 
-                // Establish uniform labels ('Jan', 'Feb' etc for months; '2024', '2025' for years)
-                let displayLabel = bucket._id;
-                if (viewMode === 'monthly') {
-                    const monthIndex = parseInt(bucket._id, 10) - 1;
-                    displayLabel = monthsArray[monthIndex] || bucket._id;
-                }
+                    // 2. UPDATED: Default to null (No Data) instead of 0%
+                    let attendanceRate: number | null = null;
 
-                return {
-                    label: displayLabel,
-                    value: attendanceRate,
-                };
-            });
+                    if (bucket) {
+                        const present = bucket.presentDays || 0;
+                        const absent = bucket.absentDays || 0;
+                        const totalExpectedDays = present + absent;
+
+                        if (totalExpectedDays > 0) {
+                            attendanceRate = Math.round((present / totalExpectedDays) * 100);
+                        } else {
+                            attendanceRate = 0; // Only 0 if they genuinely had records but 0 attendance
+                        }
+                    }
+
+                    return {
+                        label: monthName,
+                        value: attendanceRate,
+                    };
+                });
+            } else {
+                processedStats = rawAggregatedData.map((bucket) => {
+                    const present = bucket.presentDays || 0;
+                    const absent = bucket.absentDays || 0;
+                    const totalExpectedDays = present + absent;
+                    const attendanceRate = totalExpectedDays > 0
+                        ? Math.round((present / totalExpectedDays) * 100)
+                        : 0;
+
+                    return {
+                        label: bucket._id,
+                        value: attendanceRate,
+                    };
+                });
+            }
 
             return processedStats;
         } catch (error) {

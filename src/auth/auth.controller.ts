@@ -2,7 +2,7 @@ import { Controller, Post, Body, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { EmployeeService } from '../employee/employee.service';
 import { HrService } from '../hr/hr.service';
-// import { DirectorService } from '../director/director.service';
+import { DirectorService } from '../director/director.service';
 
 @Controller('api/auth')
 export class AuthController {
@@ -10,6 +10,7 @@ export class AuthController {
         private readonly authService: AuthService,
         private readonly employeeService: EmployeeService,
         private readonly hrService: HrService,
+        private readonly directorService: DirectorService,
     ) { }
 
     // ── 1. EMPLOYEE LOGIN (e.g., IA00001) ──
@@ -66,13 +67,28 @@ export class AuthController {
     // ── 3. DIRECTOR LOGIN ──
     @Post('director/login')
     async directorLogin(@Body() loginDto: any) {
-        // const user = await this.directorService.validatePassword(...);
 
-        const userId = 'mongo_id_789';
-        const role = 'Director';
+        if (!loginDto.idCode || !loginDto.password) {
+            throw new UnauthorizedException('ID Code and Password are required');
+        }
 
-        const tokens = await this.authService.generateAuthTokens(userId, role);
-        return { success: true, message: 'Director login successful', data: tokens };
+        const director = await this.directorService.validatePassword(
+            loginDto.idCode,
+            loginDto.password
+        );
+
+        if (!director) {
+            throw new UnauthorizedException('Invalid credentials.');
+        }
+
+        // Generate tokens using the director's _id and assign the 'Director' role
+        const tokens = await this.authService.generateAuthTokens(director._id.toString(), 'Director');
+
+        return {
+            success: true,
+            message: 'Director login successful',
+            data: tokens
+        };
     }
 
     // ── 4. UNIFIED REFRESH ROUTE ──

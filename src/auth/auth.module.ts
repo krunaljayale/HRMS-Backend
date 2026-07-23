@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { EmployeeModule } from '../employee/employee.module';
 import { HrModule } from '../hr/hr.module';
+import { DirectorModule } from '../director/director.module';
 
 @Module({
     imports: [
@@ -14,6 +15,7 @@ import { HrModule } from '../hr/hr.module';
         JwtModule.register({}), // Secrets are handled in the service directly now,
         EmployeeModule,
         HrModule,
+        DirectorModule,
     ],
     controllers: [AuthController],
     providers: [JwtStrategy, AuthService],

@@ -337,32 +337,65 @@ export class AttendanceService {
     async getMonthlyPerformanceInsights(employeeId: string) {
         // 1. Get the current date in 'YYYY-MM-DD' format
         const todayStr = getIST('date'); // e.g., "2026-06-09"
-
-        // Extract year-month to create the prefix for the $regex
-        // This removes the need for manual date object construction
         const currentMonthPrefix = todayStr.substring(0, 7); // "2026-06"
+
+        // Extract the day of the month (how many days have passed so far)
+        const currentDay = parseInt(todayStr.substring(8, 10), 10);
 
         // 2. Run the aggregation
         const insights = await this.attendanceModel.aggregate([
             {
                 $match: {
                     employeeId: new Types.ObjectId(employeeId),
-                    // Uses the exact same format as stored in your 'date' field
                     date: { $regex: `^${currentMonthPrefix}` }
                 }
             },
             {
                 $group: {
                     _id: null,
+
+                    // ── FIX 1: HALF DAY CALCULATION ──
                     presentCount: {
-                        $sum: { $cond: [{ $eq: ["$status", "P"] }, 1, 0] }
+                        $sum: {
+                            $switch: {
+                                branches: [
+                                    { case: { $in: ["$status", ["P", "AUTO"]] }, then: 1 },
+                                    { case: { $in: ["$status", ["Half", "HalfCompOff"]] }, then: 0.5 }
+                                ],
+                                default: 0
+                            }
+                        }
                     },
-                    absentCount: {
-                        $sum: { $cond: [{ $eq: ["$status", "A"] }, 1, 0] }
+
+                    // Track 0.5 absents from half days, or any manual 'A' docs that sneak in
+                    explicitAbsentCount: {
+                        $sum: {
+                            $switch: {
+                                branches: [
+                                    { case: { $eq: ["$status", "A"] }, then: 1 },
+                                    { case: { $in: ["$status", ["Half", "HalfCompOff"]] }, then: 0.5 }
+                                ],
+                                default: 0
+                            }
+                        }
                     },
+
+                    // How many calendar days actually have a document? (P, Half, Leave, Holiday)
+                    // We use this to find out how many days are completely missing from the DB
+                    accountedCalendarDays: {
+                        $sum: {
+                            $cond: [
+                                { $in: ["$status", ["P", "AUTO", "Half", "HalfCompOff", "L", "CompOff", "H"]] },
+                                1, // Even a half-day counts as 1 known calendar day
+                                0
+                            ]
+                        }
+                    },
+
                     lateCount: {
                         $sum: { $cond: [{ $eq: ["$isLate", true] }, 1, 0] }
                     },
+
                     totalAccumulatedHours: {
                         $sum: "$totalHours"
                     }
@@ -370,22 +403,51 @@ export class AttendanceService {
             }
         ]);
 
-        // 3. Format the response exactly how your frontend InsightsData interface expects it
-        if (insights.length === 0) {
-            return { present: 0, absent: 0, late: 0, totalHours: 0 };
+        // 3. Fallback values if no documents exist for the month yet
+        let present = 0;
+        let late = 0;
+        let avgHours = 0;
+        let explicitAbsent = 0;
+        let accountedDays = 0;
+
+        if (insights.length > 0) {
+            const data = insights[0];
+            present = data.presentCount;
+            late = data.lateCount;
+            explicitAbsent = data.explicitAbsentCount;
+            accountedDays = data.accountedCalendarDays;
+
+            avgHours = present > 0
+                ? parseFloat((data.totalAccumulatedHours / present).toFixed(1))
+                : 0;
         }
 
-        const data = insights[0];
+        // ── FIX 2: ABSENT CALCULATION (NON-EXISTENT DOCS) ──
+        // Missing Days = (Days passed so far this month) - (Days we have records for)
+        const missingDays = currentDay - accountedDays;
 
-        // Calculate the daily average hours (Total Hours / Days Present)
-        const avgHours = data.presentCount > 0
-            ? parseFloat((data.totalAccumulatedHours / data.presentCount).toFixed(1))
-            : 0;
+        // Out of these missing days, we need to NOT count Week Offs (Sundays) as Absents
+        const [year, month] = currentMonthPrefix.split('-').map(Number);
+        let weekOffsPassed = 0;
+
+        for (let i = 1; i <= currentDay; i++) {
+            const date = new Date(year, month - 1, i);
+            if (date.getDay() === 0) { // 0 = Sunday. Change to 6 if Saturdays are week-offs, etc.
+                weekOffsPassed++;
+            }
+        }
+
+        // Unaccounted Absents = Missing DB records MINUS the expected Week Offs
+        // Math.max(0, ...) prevents negative numbers if someone works on a Sunday
+        const unaccountedAbsents = Math.max(0, missingDays - weekOffsPassed);
+
+        // Total Absents = (Calculated missing days) + (Explicit 0.5 absents from half days)
+        const absent = unaccountedAbsents + explicitAbsent;
 
         return {
-            present: data.presentCount,
-            absent: data.absentCount,
-            late: data.lateCount,
+            present,
+            absent,
+            late,
             totalHours: avgHours
         };
     }

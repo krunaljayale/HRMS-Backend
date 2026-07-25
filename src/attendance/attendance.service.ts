@@ -150,78 +150,87 @@ export class AttendanceService {
         session.startTransaction();
 
         try {
-            // 2. GET BOTH TYPES OF TIME USING NEW UTILS
             const now = getIST() as Date;
-            const dateString = getIST('date') as string;
 
-            // 3. Fetch exact employee (Fixes the bug where employeeId was passed to employeeCode)
+            // 2. Fetch exact employee
             const fullEmployee = await this.employeeService.getEmployeeById(jwtPayload.employeeId, 'employeeCode');
 
-            // 4. Find today's record explicitly using the transaction session
+            // 3. Find the active open check-in record (handles midnight/overnight checkout)
+            // By looking for missing outTime, we don't accidentally query tomorrow's date if they check out after 12:00 AM
             const attendance = await this.attendanceModel.findOne({
                 employeeCode: fullEmployee.employeeCode,
-                date: dateString,
-            }).session(session);
+                outTime: { $exists: false },
+            }).sort({ createdAt: -1 }).session(session);
 
-            // 5. Strict Validations
-            if (!attendance) throw new BadRequestException('No attendance record found for today.');
-            if (!attendance.inTime) throw new BadRequestException('No check-in found for today. Please check in first.');
-            if (attendance.outTime) throw new BadRequestException('Already checked out today.');
+            // 4. Strict Validations
+            if (!attendance) throw new BadRequestException('No active check-in found for checkout.');
+            if (!attendance.inTime) throw new BadRequestException('Invalid check-in record.');
 
-            // 6. Geo Validation
+            // 5. Geo Validation
             await this.validateLocation(dto.latitude, dto.longitude, attendance.workMode);
 
-            // 7. Calculate Worked Hours mathematically
-            const workedMs = now.getTime() - attendance.inTime.getTime();
-            const totalMinutes = Math.round(workedMs / 60000);
+            // 6. Calculate Worked Time safely (prevents 'getTime is not a function' errors)
+            const inTimeMs = new Date(attendance.inTime).getTime();
+            const workedMs = now.getTime() - inTimeMs;
+            const totalMinutes = Math.max(0, Math.round(workedMs / 60000));
             const totalHours = Number((workedMs / 3600000).toFixed(2));
 
-            // 8. Determine Shift Requirements using accurate IST day
-            const istDateStr = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
-            const dayOfWeek = new Date(istDateStr).getDay(); // 0 = Sunday, 6 = Saturday
-            const shiftMinutes = 510; //dayOfWeek === 6 ? 420 : 510; // Sat = 7 hrs, Mon-Fri = 8.5 hrs
+            // 7. Determine Day of Week & Holiday safely for AWS Lightsail (UTC fallback proof)
+            const checkInDateStr = attendance.date; // Uses the string saved during check-in (e.g., "YYYY-MM-DD")
+            const [year, month, day] = checkInDateStr.split('-').map(Number);
 
-            // 9. Overtime & Shortfall
-            let overtimeMinutes = 0;
-            let shortfallMinutes = 0;
-            if (totalMinutes >= shiftMinutes) {
-                overtimeMinutes = totalMinutes - shiftMinutes;
-            } else {
-                shortfallMinutes = shiftMinutes - totalMinutes;
-            }
+            // Date.UTC mathematically locks the date, bypassing the server's local timezone entirely
+            const shiftDate = new Date(Date.UTC(year, month - 1, day));
+            const dayOfWeek = shiftDate.getUTCDay(); // 0 = Sunday, 6 = Saturday
 
-            // 10. Finalize Status
             const isSunday = dayOfWeek === 0;
-            const isHoliday = await this.holidayService.checkIsHoliday(dateString);
+            const isHoliday = await this.holidayService.checkIsHoliday(checkInDateStr);
 
-            // Calculate hurdles for both regular days and comp-offs
-            const halfDayHurdle = shiftMinutes / 2;
+            // 8. Shift & Grace Thresholds
+            const shiftMinutes = 510; // 8.5 hours
             const tenMinuteGrace = 10;
 
-            //  NEW: Track the value of the token we need to mint
+            // Apply grace period fairly to both full and half days
+            const fullDayThreshold = shiftMinutes - tenMinuteGrace; // 500 mins
+            const halfDayThreshold = (shiftMinutes / 2) - tenMinuteGrace; // 245 mins
+
+            let overtimeMinutes = 0;
+            let shortfallMinutes = 0;
             let earnedCompOffValue = 0;
 
+            // 9. Overtime & Shortfall Logic
             if (isSunday || isHoliday) {
-                //  CompOff Evaluation (Full vs Half)
+                // On non-working days, all time worked is technically "overtime" and there is no shortfall
+                overtimeMinutes = totalMinutes;
+                shortfallMinutes = 0;
+            } else {
                 if (totalMinutes >= shiftMinutes) {
+                    overtimeMinutes = totalMinutes - shiftMinutes;
+                } else {
+                    shortfallMinutes = shiftMinutes - totalMinutes;
+                }
+            }
+
+            // 10. Status & Comp-Off Evaluation
+            if (isSunday || isHoliday) {
+                // CompOff Evaluation (Full vs Half)
+                if (totalMinutes >= fullDayThreshold) {
                     attendance.status = 'CompOff';
                     earnedCompOffValue = 1;
-                } else if ((totalMinutes + tenMinuteGrace) >= halfDayHurdle) {
+                } else if (totalMinutes >= halfDayThreshold) {
                     attendance.status = 'HalfCompOff';
                     earnedCompOffValue = 0.5;
                 } else {
-                    // Worked less than 4.5 hours on a Sunday. No token earned.
-                    attendance.status = 'P';
+                    // Worked less than the minimum hurdle on a weekend/holiday. No token earned.
+                    attendance.status = 'A'; // Or whatever your policy dictates for an invalid weekend punch
                 }
             } else {
                 // Normal Working Day Evaluation
-                if (totalMinutes >= shiftMinutes) {
+                if (totalMinutes >= fullDayThreshold) {
                     attendance.status = 'P'; // Full Day
-                }
-                else if ((totalMinutes + tenMinuteGrace) >= halfDayHurdle) {
+                } else if (totalMinutes >= halfDayThreshold) {
                     attendance.status = 'Half'; // Half Day
-                }
-                else {
+                } else {
                     attendance.status = 'A'; // Absent / LOP
                 }
             }
@@ -237,7 +246,7 @@ export class AttendanceService {
             attendance.todayWork = dto.todayWork;
             attendance.pendingWork = dto.pendingWork;
             attendance.issuesFaced = dto.issuesFaced;
-            attendance.reportParticipant = dto.reportParticipant
+            attendance.reportParticipant = dto.reportParticipant;
 
             // 13. Breadcrumb location
             if (dto.latitude != null && dto.longitude != null) {
@@ -251,7 +260,7 @@ export class AttendanceService {
                 });
             }
 
-            // 13.5 MINT COMP-OFF TOKEN IF EARNED 
+            // 14. Mint Comp-Off Token if earned
             if (earnedCompOffValue > 0) {
                 await this.leaveService.createCompOff(
                     jwtPayload.employeeId,
@@ -263,7 +272,7 @@ export class AttendanceService {
                 );
             }
 
-            // 14. SAVE WITH SESSION AND COMMIT
+            // 15. Save with session and commit
             await attendance.save({ session });
             await session.commitTransaction();
 

@@ -2,12 +2,15 @@ import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nes
 import { LeaveService } from '../leave/leave.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DirectorService } from './director.service';
+import { UpdateComplaintStatusDto } from '../complaint/dto/update-complaint-status.dto';
+import { ComplaintService } from '../complaint/complaint.service';
 
 @Controller('api/web/director')
 export class DirectorWebController {
   constructor(
     private readonly leaveService: LeaveService,
     private readonly directorService: DirectorService,
+    private readonly complaintService: ComplaintService,
   ) { }
 
 
@@ -111,5 +114,39 @@ export class DirectorWebController {
       data: result.data,
       meta: result.meta,
     };
+  }
+
+  // ─── GET LIVE COMPLAINTS ───
+  @Get('complaints/live')
+  @UseGuards(JwtAuthGuard)
+  async getDirectorLiveComplaints(@Query('search') search?: string) {
+    return await this.complaintService.getDirectorLiveComplaints(search);
+  }
+
+  // ─── GET HISTORICAL COMPLAINTS ───
+  @Get('complaints/historical')
+  @UseGuards(JwtAuthGuard)
+  async getDirectorHistoryComplaints(@Query('search') search?: string) {
+    return await this.complaintService.getDirectorHistoryComplaints(search);
+  }
+
+  // ─── UPDATE COMPLAINT STATUS / ISSUE DIRECTIVE ───
+  @Patch('complaints/:id/status')
+  @UseGuards(JwtAuthGuard)
+  async updateDirectorComplaintStatus(
+    @Param('id') complaintId: string,
+    @Body() body: Omit<UpdateComplaintStatusDto, 'actionBy' | 'role'>,
+    @Req() req: any,
+  ) {
+    const directorId = req.user.sub;
+
+    const updateDto: UpdateComplaintStatusDto = {
+      status: body.status,
+      comments: body.comments,
+      actionBy: directorId,
+      role: 'DIRECTOR',
+    };
+
+    return await this.complaintService.updateStatus(complaintId, updateDto);
   }
 }

@@ -126,6 +126,20 @@ export class EmployeeService {
     return employee;
   }
 
+  async findEmployeeIdsBySearch(search: string): Promise<Types.ObjectId[]> {
+    if (!search || !search.trim()) return [];
+
+    const regex = new RegExp(search.trim(), 'i');
+    const employees = await this.employeeModel
+      .find({
+        $or: [{ name: regex }, { employeeCode: regex }],
+      })
+      .select('_id')
+      .lean();
+
+    return employees.map((e) => e._id as Types.ObjectId);
+  }
+
   // ─── FETCH ONLY ACTIVE EMPLOYEES (Optional Helper) ───────────
   /**
    * A cleaner alternative if you prefer not to pass the filter object
@@ -160,7 +174,9 @@ export class EmployeeService {
     const { page = 1, limit = 50, search, department, status } = queryDto;
 
     // 1. Build the query object
-    const query: any = {};
+    const query: any = {
+      employeeCode: { $ne: 'IA11111' }, // Exclude Test employee ID
+    };
 
     if (status) query.status = status;
     if (department) query.department = { $regex: department, $options: 'i' };
@@ -170,6 +186,7 @@ export class EmployeeService {
         { name: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
         { mobileNumber: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } },
       ];
     }
 
@@ -880,5 +897,7 @@ export class EmployeeService {
 
     return await this.leaveService.getResolvedHistoryForManager(targetId, reportIds, page, limit, status);
   }
+
+
 
 }

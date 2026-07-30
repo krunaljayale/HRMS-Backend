@@ -8,6 +8,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { LeaveModule } from '../leave/leave.module';
 import { PayrollModule } from '../payroll/payroll.module';
 import { ReimbursementModule } from '../reimbursement/reimbursement.module';
+import { ComplaintModule } from '../complaint/complaint.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { ReimbursementModule } from '../reimbursement/reimbursement.module';
     AttendanceModule,
     LeaveModule,
     PayrollModule,
-    ReimbursementModule
+    ReimbursementModule,
+    ComplaintModule
   ],
   controllers: [HrWebController],
   providers: [HrService],

@@ -28,6 +28,8 @@ import 'multer';
 import { PayrollService } from '../payroll/payroll.service';
 import { ReimbursementService } from '../reimbursement/reimbursement.service';
 import { ChangePasswordDto } from '../employee/dto/change-password.dto';
+import { ComplaintService } from '../complaint/complaint.service';
+import { UpdateComplaintStatusDto } from '../complaint/dto/update-complaint-status.dto';
 
 @Controller('api/web/hr')
 export class HrWebController {
@@ -37,6 +39,7 @@ export class HrWebController {
     private readonly employeeService: EmployeeService,
     private readonly leaveService: LeaveService,
     private readonly reimbursementService: ReimbursementService,
+    private readonly complaintService: ComplaintService,
   ) { }
 
   @Patch('attendance/corrections/:id/approve')
@@ -270,6 +273,44 @@ export class HrWebController {
   @HttpCode(HttpStatus.OK)
   async changePassword(@Body() changePasswordDto: ChangePasswordDto) {
     return await this.hrService.changeMasterPassword(changePasswordDto);
+  }
+
+
+  // ─── GET LIVE COMPLAINTS (Pending, Acknowledged, In Review) ───
+  @Get('complaints/live')
+  @UseGuards(JwtAuthGuard)
+  async getLiveComplaints(@Query('search') search?: string) {
+    return await this.complaintService.getHrLiveComplaints(search);
+  }
+
+  @Get('complaints/historical')
+  @UseGuards(JwtAuthGuard)
+  async getHistoricalComplaints(
+    @Query('search') search?: string) {
+    return await this.complaintService.getHistoricalComplaintsForHr(search);
+  }
+
+
+  @Patch('complaints/:id/status')
+  @UseGuards(JwtAuthGuard)
+  async updateComplaintStatus(
+    @Param('id') complaintId: string,
+    @Body() body: Omit<UpdateComplaintStatusDto, 'actionBy' | 'role'>, // Frontend doesn't send these securely
+    @Req() req: any,
+  ) {
+    // 1. Extract HR Admin ID securely from JWT token payload
+    const adminId = req.user.employeeId;
+
+    // 2. Construct the full DTO expected by your shared service method
+    const updateDto: UpdateComplaintStatusDto = {
+      status: body.status,
+      comments: body.comments,
+      actionBy: adminId,
+      role: 'HR', // Hardcoded securely on backend
+    };
+
+    // 3. Call your existing service method
+    return await this.complaintService.updateStatus(complaintId, updateDto);
   }
 
 }

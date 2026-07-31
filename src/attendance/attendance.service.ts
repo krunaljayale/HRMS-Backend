@@ -966,6 +966,15 @@ export class AttendanceService {
                     workMode: 1,
                     isLate: 1,
                     lateMinutes: 1,
+
+                    // ─── MAP LOCATION DATA ADDED HERE ───
+                    // We alias checkIn coordinates to match the frontend MapModal props
+                    latitude: '$checkInLatitude',
+                    longitude: '$checkInLongitude',
+                    checkOutLatitude: 1,
+                    checkOutLongitude: 1,
+                    locationHistory: 1,
+
                     // Pulling from joined Employee Data
                     department: { $ifNull: ['$employeeData.department', 'Unassigned'] },
                     designation: { $ifNull: ['$employeeData.position', 'Employee'] },
@@ -1293,7 +1302,16 @@ export class AttendanceService {
                                     // EOD Report Fields for the Modal
                                     todayWork: 1,
                                     pendingWork: 1,
-                                    issuesFaced: 1
+                                    issuesFaced: 1,
+
+                                    // ─── MAP LOCATION DATA ADDED HERE ───
+                                    latitude: { $ifNull: ['$checkInLatitude', null] },
+                                    longitude: { $ifNull: ['$checkInLongitude', null] },
+                                    checkOutLatitude: { $ifNull: ['$checkOutLatitude', null] },
+                                    checkOutLongitude: { $ifNull: ['$checkOutLongitude', null] },
+
+                                    // Passes the entire 30-min poll history array to frontend
+                                    locationHistory: { $ifNull: ['$locationHistory', []] }
                                 }
                             }
                         ]

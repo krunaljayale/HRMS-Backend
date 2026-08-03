@@ -389,25 +389,52 @@ export class LeaveService {
         await leave.save();
 
         // 📱 FIREBASE PUSH NOTIFICATION
-        const employee = await this.employeeService.getEmployeeById(leave.employeeId.toString(), 'fcmToken name');
 
+        // 1. Update projection to include 'managerId'
+        const employee = await this.employeeService.getEmployeeById(
+            leave.employeeId.toString(),
+            'fcmToken name managerId'
+        );
+
+        const remarkText = remarks ? ` Reason: "${remarks}"` : '';
+
+        // --- NOTIFY EMPLOYEE ---
         if (employee && employee.fcmToken) {
-            // Format the remark to append to the notification if it exists
-            const remarkText = remarks ? ` Reason: "${remarks}"` : '';
-
-            // We don't await this because we don't want the HTTP response 
-            // to wait for Firebase to finish routing the notification.
             this.notificationService.sendToEmployee({
                 token: employee.fcmToken,
                 title: "Leave Rejected ❌",
-                // Dynamically state who rejected it and why
                 body: `Hi ${employee.name}, your ${leave.leaveCategory} leave request was rejected by ${actingProfile}.${remarkText}`,
                 data: {
                     type: "LEAVE_UPDATE",
                     leaveId: leave._id.toString(),
                     status: "Rejected"
                 }
-            }).catch(e => console.error("FCM Async Error:", e));
+            }).catch(e => console.error("FCM Employee Async Error:", e));
+        }
+
+        // --- NOTIFY MANAGER ---
+        // 2. Check if the employee has an assigned manager
+        if (employee && employee.managerId) {
+            // 3. Fetch the manager's token and name
+            const manager = await this.employeeService.getEmployeeById(
+                employee.managerId.toString(),
+                'fcmToken name'
+            );
+
+            // 4. Send notification to the manager
+            if (manager && manager.fcmToken) {
+                this.notificationService.sendToEmployee({
+                    token: manager.fcmToken,
+                    title: "Team Leave Rejected ❌",
+                    body: `${employee.name}'s ${leave.leaveCategory} leave request was rejected by ${actingProfile}.${remarkText}`,
+                    data: {
+                        type: "TEAM_LEAVE_UPDATE",
+                        leaveId: leave._id.toString(),
+                        employeeId: employee._id.toString(),
+                        status: "Rejected"
+                    }
+                }).catch(e => console.error("FCM Manager Async Error:", e));
+            }
         }
 
         return leave;

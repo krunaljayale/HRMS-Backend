@@ -8,6 +8,7 @@ import { AttendanceAppController } from './attendance.app.controller';
 import { EmployeeModule } from '../employee/employee.module';
 import { LeaveModule } from '../leave/leave.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
+import { AttendanceWebController } from './attendance.web.controller';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
     HolidayModule,
     SystemConfigModule,
   ],
-  controllers: [AttendanceAppController],
+  controllers: [AttendanceAppController, AttendanceWebController],
   providers: [AttendanceService],
   exports: [AttendanceService],
 })

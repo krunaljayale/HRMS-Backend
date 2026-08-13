@@ -119,6 +119,8 @@ export class PayrollService {
 
       const record = attendances.find((a) => a.date === dStr);
 
+      const hasCheckedOut = record ? Boolean(record.outTime) : false;
+
       const leaveRecord = approvedLeaves.find((l) => {
         const startStr = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'Asia/Kolkata',
@@ -147,7 +149,9 @@ export class PayrollService {
         dayStatus = 'Holiday';
         isFreeDay = true;
       } else {
-        if (record && record.status === 'P') {
+        if (record && !hasCheckedOut) {
+          dayStatus = 'Absent';
+        }else if (record && record.status === 'P') {
           dayStatus = 'Present';
         } else if (record && record.status === 'Half') {
           if (leaveRecord && leaveRecord.leaveCategory === 'Paid') {

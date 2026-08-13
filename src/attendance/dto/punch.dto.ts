@@ -14,7 +14,15 @@ export class CheckInDto {
     workMode!: string;
 }
 
-export class CheckOutDto extends CheckInDto {
+export class CheckOutDto {
+    @IsNumber()
+    @IsOptional()
+    latitude?: number;
+
+    @IsNumber()
+    @IsOptional()
+    longitude?: number;
+
     @IsString()
     @IsOptional()
     todayWork?: string;
@@ -27,6 +35,7 @@ export class CheckOutDto extends CheckInDto {
     @IsOptional()
     issuesFaced?: string;
 
+    // ONLY EXPECT A SINGLE STRING NOW
     @IsString()
     @IsOptional()
     reportParticipant!: Types.ObjectId;

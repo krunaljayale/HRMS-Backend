@@ -25,6 +25,10 @@ export class CheckOutDto {
 
     @IsString()
     @IsOptional()
+    workMode?: string;
+
+    @IsString()
+    @IsOptional()
     todayWork?: string;
 
     @IsString()

@@ -8,6 +8,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { LeaveModule } from '../leave/leave.module';
 import { HolidayModule } from '../holiday/holiday.module';
 import { ReimbursementModule } from '../reimbursement/reimbursement.module';
+import { PayrollWebController } from './payroll.web.controller';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { ReimbursementModule } from '../reimbursement/reimbursement.module';
     HolidayModule,
     ReimbursementModule,
   ],
-  controllers: [PayrollAppController],
+  controllers: [PayrollAppController, PayrollWebController],
   providers: [PayrollService],
   exports: [PayrollService],
 })

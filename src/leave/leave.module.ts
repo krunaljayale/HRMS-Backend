@@ -6,6 +6,7 @@ import { LeaveLedger, LeaveLedgerSchema } from './schemas/leave-ledger.schema';
 import { LeaveHistory, LeaveHistorySchema } from './schemas/leave-history.schema';
 import { EmployeeModule } from '../employee/employee.module';
 import { NotificationsModule } from '../notification/notification.module';
+import { LeaveWebController } from './leave.web.controller';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { NotificationsModule } from '../notification/notification.module';
     forwardRef(() => EmployeeModule),
     NotificationsModule,
   ],
-  controllers: [LeaveAppController],
+  controllers: [LeaveAppController,LeaveWebController],
   providers: [LeaveService],
   exports: [LeaveService],
 })

@@ -8,22 +8,4 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @Controller('api/web/alert')
 export class AlertWebController {
   constructor(private readonly alertService: AlertService) { }
-
-  @Post('upsert')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Admin: Create or update the global app alert' })
-  @ApiResponse({ status: 201, description: 'The alert has been successfully updated.' })
-  async upsertGlobalAlert(
-    @Body() dto: UpsertAlertDto,
-    @Request() req: any
-  ) {
-    const employeeId = req.user.employeeId;
-    const updatedAlert = await this.alertService.upsertAlert(dto, employeeId);
-
-    return {
-      success: true,
-      message: 'Global alert updated successfully',
-      data: updatedAlert,
-    };
-  }
 }

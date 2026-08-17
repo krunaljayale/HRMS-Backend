@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { GlobalAlert, GlobalAlertDocument } from './schemas/alert.schema';
 import { UpsertAlertDto } from './dto/upsert-alert.dto';
 import { CheckAlertDto } from './dto/check-alert.dto';
 import { EmployeeService } from '../employee/employee.service';
+import { HrService } from '../hr/hr.service';
 
 @Injectable()
 export class AlertService {
@@ -19,40 +20,62 @@ export class AlertService {
   constructor(
     @InjectModel(GlobalAlert.name) private alertModel: Model<GlobalAlertDocument>,
     private readonly employeeService: EmployeeService,
+    @Inject(forwardRef(() => HrService)) private readonly hrService: HrService,
   ) { }
 
 
-  // ── ADMIN FEATURE: UPSERT ALERT BY TYPE WITH SECURITY ──
-  async upsertAlert(alertData: UpsertAlertDto, id: string) {
+  // ── ADMIN FEATURE: UPSERT ALERT ──
+  async upsertAlert(alertData: UpsertAlertDto) {
+    // 1. Call your existing method to securely get the Master HR Profile
+    const hrProfile = await this.hrService.getMasterProfile();
 
-    // 1. Fetch the requestor's employee record
-    const employee = await this.employeeService.getEmployeeById(id, 'role isAppAdmin');
+    // Extract the raw ObjectId string from the populated account
+    const employeeId = hrProfile.employeeAccount._id.toString();
 
-    const requestorRole = employee.role;
+    // 2. Fetch the employee record to verify roles
+    const employee = await this.employeeService.getEmployeeById(employeeId);
+
+    if (!employee) {
+      throw new UnauthorizedException('User not found.');
+    }
+
     const isAppAdmin = employee.isAppAdmin;
 
-    //  RULE 1: Technical Updates (Force / Optional)
-    if (alertData.type === 'force_update' || alertData.type === 'optional_update' || alertData.type === 'maintenance') {
+    // 3. SECURITY RULE: Only AppAdmins can post technical/app-breaking alerts
+    const technicalTypes = ['force_update', 'optional_update', 'maintenance'];
+    if (alertData.type && technicalTypes.includes(alertData.type)) {
       if (!isAppAdmin) {
         throw new UnauthorizedException(
-          'Only users with AppAdmin privileges can trigger version updates.'
+          'SYSTEM_LOCKED: Only users with AppAdmin privileges can trigger version updates.'
         );
       }
     }
 
-    //  RULE 2: HR Announcements (Info / Promo )
-    if (!isAppAdmin && requestorRole !== 'HR') {
-      throw new UnauthorizedException(
-        'You must be an HR Administrator to post company announcements.'
-      );
+    // Notice: We completely removed the HR restriction block here. 
+    // Normal announcements ('info', 'promo') will now pass straight through!
+
+    // ── DATA TRANSFORMATION ──
+    const payloadToSave: any = { ...alertData };
+
+    if (alertData.buttonLink && alertData.buttonLink.trim() !== '') {
+      payloadToSave.buttonLink = {
+        android: alertData.buttonLink,
+        ios: alertData.buttonLink,
+      };
+    } else {
+      payloadToSave.buttonLink = null;
     }
 
-    //  Save to database
+    if (!alertData.imageUrl || alertData.imageUrl.trim() === '') {
+      payloadToSave.imageUrl = null;
+    }
+
+    // Save to Database
     return this.alertModel.findOneAndUpdate(
       { type: alertData.type },
-      { $set: alertData },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+      { $set: payloadToSave },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
+    ).exec();
   }
 
   // ── MOBILE APP FEATURE: CHECK ALERT (PRIORITY QUEUE) ──
@@ -90,5 +113,13 @@ export class AlertService {
 
     // 4. Return ONLY the single most important alert to match your React Native routing behavior
     return validAlerts[0];
+  }
+
+  // ── WEB ADMIN FEATURE: GET ALERTS ──
+  async getWebAlerts() {
+    // Only fetch announcement types relevant to the web portal (hide technical updates)
+    return this.alertModel.find({
+      type: { $in: ['info', 'promo'] }
+    }).sort({ updatedAt: -1 }).exec();
   }
 }

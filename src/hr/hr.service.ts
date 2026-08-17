@@ -13,6 +13,7 @@ export class HrService {
         private employeeService: EmployeeService,
     ) { }
 
+
     private async getRawMasterProfile(): Promise<HrProfileDocument> {
         const hrProfile = await this.hrProfileModel.findOne({ isActive: true }).exec();
         if (!hrProfile) {

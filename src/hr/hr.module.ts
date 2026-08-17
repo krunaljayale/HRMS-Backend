@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { HrService } from './hr.service';
 import { HrWebController } from './hr.web.controller';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -9,6 +9,8 @@ import { LeaveModule } from '../leave/leave.module';
 import { PayrollModule } from '../payroll/payroll.module';
 import { ReimbursementModule } from '../reimbursement/reimbursement.module';
 import { ComplaintModule } from '../complaint/complaint.module';
+import { HolidayModule } from '../holiday/holiday.module';
+import { AlertModule } from '../alert/alert.module';
 
 @Module({
   imports: [
@@ -19,7 +21,9 @@ import { ComplaintModule } from '../complaint/complaint.module';
     LeaveModule,
     PayrollModule,
     ReimbursementModule,
-    ComplaintModule
+    ComplaintModule,
+    forwardRef(() => AlertModule),
+    forwardRef(() => HolidayModule),
   ],
   controllers: [HrWebController],
   providers: [HrService],

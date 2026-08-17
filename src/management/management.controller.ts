@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ManagementService } from './management.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AttendanceService } from '../attendance/attendance.service';
@@ -8,7 +8,11 @@ import { PayrollService } from '../payroll/payroll.service';
 import { ProcessAllActivePayrollDto } from '../payroll/dto/process-all-active-payroll.dto';
 import type { Response } from 'express';
 import { ReimbursementService } from '../reimbursement/reimbursement.service';
+import { HolidayService } from '../holiday/holiday.service';
+import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { AlertService } from '../alert/alert.service';
 
+@UseGuards(JwtAuthGuard)
 @Controller('api/web/management')
 export class ManagementController {
   constructor(
@@ -17,18 +21,18 @@ export class ManagementController {
     private readonly employeeService: EmployeeService,
     private readonly payrollService: PayrollService,
     private readonly reimbursementService: ReimbursementService,
+    private readonly holidayService: HolidayService,
+    private readonly alertService: AlertService,
   ) { }
 
   @Get('get-general-stats')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
   async getGeneralStats() {
     return await this.managementService.getGeneralStats();
   }
 
   @Get('get-average-stats')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
   async getAverageAttendanceStats(@Query('type') type: string) {
     // 1. Validate query parameters strictly before querying the DB
     if (!type || (type !== 'monthly' && type !== 'yearly')) {
@@ -43,27 +47,23 @@ export class ManagementController {
 
   @Get('get-department-stats')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
   async getDepartmentStats() {
     return this.employeeService.getDepartmentWiseCount();
   }
 
   @Get('get-recent-joined-employees')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
   async getRecentEmployees() {
     return this.employeeService.getRecentHires();
   }
 
   @Get('get-upcoming-birthdays')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
   async getUpcomingBirthdays() {
     return this.employeeService.getUpcomingBirthdays();
   }
 
   @Get('attendance/live-roster')
-  @UseGuards(JwtAuthGuard)
   async getLiveRoster(
     @Query('department') department?: string,
     @Query('workMode') workMode?: string,
@@ -85,7 +85,6 @@ export class ManagementController {
   }
 
   @Get('attendance/pending-corrections-count')
-  @UseGuards(JwtAuthGuard)
   async getPendingCorrectionsCount() {
     const count = await this.attendanceService.getPendingCorrectionsCount();
 
@@ -99,7 +98,6 @@ export class ManagementController {
   }
 
   @Get('attendance/corrections')
-  @UseGuards(JwtAuthGuard)
   async getCorrections(@Query('status') status?: string) {
     const data = await this.attendanceService.getCorrections(status);
 
@@ -111,7 +109,6 @@ export class ManagementController {
   }
 
   @Get('attendance/historical-ledger')
-  @UseGuards(JwtAuthGuard)
   async getHistoricalLedger(
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
@@ -140,7 +137,6 @@ export class ManagementController {
   }
 
   @Get('employees')
-  @UseGuards(JwtAuthGuard)
   async getAllEmployees(
     @Query('search') search?: string,
     @Query('department') department?: string,
@@ -165,7 +161,6 @@ export class ManagementController {
   }
 
   @Get('employees/:id')
-  @UseGuards(JwtAuthGuard)
   async getEmployee(
     @Param('id') employeeId: string,
     @Query('fields') fields?: string,
@@ -183,7 +178,6 @@ export class ManagementController {
 
   // ─── 1. STATIC PATHS GO FIRST ───
   @Get('payroll/payrollList')
-  @UseGuards(JwtAuthGuard)
   async getPayrollList(
     @Req() req: any,
     @Query() queryDto: GetPayrollListQueryDto
@@ -193,7 +187,6 @@ export class ManagementController {
   }
 
   @Post('payroll/process-all-active')
-  @UseGuards(JwtAuthGuard)
   async processAllActive(
     @Req() req: any,
     @Body() body: ProcessAllActivePayrollDto
@@ -222,7 +215,6 @@ export class ManagementController {
   }
 
   @Get('payroll/export')
-  @UseGuards(JwtAuthGuard)
   async exportExcel(
     @Query('targetMonth') targetMonth: string,
     @Query('targetYear') targetYear: string,
@@ -272,14 +264,34 @@ export class ManagementController {
   }
 
   @Get('reimbursement/pending')
-  @UseGuards(JwtAuthGuard)
   async getPendingReimbursements() {
     return await this.reimbursementService.getPendingClaimsForHr();
   }
 
   @Get('reimbursement/historical')
-  @UseGuards(JwtAuthGuard)
   async getHistoricalReimbursements() {
     return await this.reimbursementService.getHistoricalClaimsForHr();
   }
+
+  // Holidays Controllers
+  // e.g., GET /api/web/management/holidays?year=2026
+  @Get('holidays')
+  async findAll(@Query('year', ParseIntPipe) year: number) {
+    const data = await this.holidayService.findAllByYear(year);
+    return { success: true, data };
+  }
+
+  @Get('announcements/check')
+  @ApiOperation({ summary: 'Admin: Get all company announcements (info, promo)' })
+  @ApiResponse({ status: 200, description: 'Returns a list of manageable alerts.' })
+  async getAlerts() {
+    const alerts = await this.alertService.getWebAlerts();
+
+    return {
+      success: true,
+      message: 'Alerts fetched successfully',
+      data: alerts,
+    };
+  }
+
 }

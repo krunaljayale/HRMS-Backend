@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsEnum, IsUrl } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsEnum, IsUrl, ValidateIf } from 'class-validator';
 
 export class UpsertAlertDto {
   @IsString()
@@ -7,7 +7,7 @@ export class UpsertAlertDto {
   @IsString()
   message!: string;
 
-  @IsOptional()
+  @ValidateIf(o => o.buttonLink !== '' && o.buttonLink !== undefined && o.buttonLink !== null)
   @IsUrl()
   imageUrl?: string;
 
@@ -15,7 +15,7 @@ export class UpsertAlertDto {
   @IsString()
   buttonText?: string;
 
-  @IsOptional()
+  @ValidateIf(o => o.buttonLink !== '' && o.buttonLink !== undefined && o.buttonLink !== null)
   @IsUrl()
   buttonLink?: string;
 
@@ -34,6 +34,7 @@ export class UpsertAlertDto {
   @IsEnum(['android', 'ios', 'both'])
   platform!: string;
 
+  // Technical fields remain optional so the Web Portal doesn't need to send them
   @IsOptional()
   @IsNumber()
   minimumVersionCode?: number;

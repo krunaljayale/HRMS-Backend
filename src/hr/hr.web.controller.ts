@@ -2,15 +2,19 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
+  forwardRef,
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Patch,
   Post,
   Put,
   Query,
   Req,
+  Request,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -30,7 +34,13 @@ import { ReimbursementService } from '../reimbursement/reimbursement.service';
 import { ChangePasswordDto } from '../employee/dto/change-password.dto';
 import { ComplaintService } from '../complaint/complaint.service';
 import { UpdateComplaintStatusDto } from '../complaint/dto/update-complaint-status.dto';
+import { CreateHolidayDto } from '../holiday/dto/create-holiday.dto';
+import { HolidayService } from '../holiday/holiday.service';
+import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { UpsertAlertDto } from '../alert/dto/upsert-alert.dto';
+import { AlertService } from '../alert/alert.service';
 
+@UseGuards(JwtAuthGuard)
 @Controller('api/web/hr')
 export class HrWebController {
   constructor(
@@ -40,10 +50,14 @@ export class HrWebController {
     private readonly leaveService: LeaveService,
     private readonly reimbursementService: ReimbursementService,
     private readonly complaintService: ComplaintService,
+    @Inject(forwardRef(() => HolidayService)) 
+    private readonly holidayService: HolidayService,
+    
+    @Inject(forwardRef(() => AlertService)) 
+    private readonly alertService: AlertService,
   ) { }
 
   @Patch('attendance/corrections/:id/approve')
-  @UseGuards(JwtAuthGuard)
   async approveCorrection(@Param('id') attendanceId: string, @Req() req: any) {
     // Extract HR admin ID from the JWT token
     const adminId = req.user.sub;
@@ -54,7 +68,6 @@ export class HrWebController {
   }
 
   @Patch('attendance/corrections/:id/reject')
-  @UseGuards(JwtAuthGuard)
   async rejectCorrection(
     @Param('id') attendanceId: string,
     @Body('remark') remark: string,
@@ -85,7 +98,6 @@ export class HrWebController {
   }
 
   @Patch('leaves/:id/approve')
-  @UseGuards(JwtAuthGuard)
   async approveLeave(@Param('id') leaveId: string, @Req() req: any) {
     // req.user.employeeId represents the logged-in HR Admin's ID
     const hrAdminId = req.user.employeeId;
@@ -99,7 +111,6 @@ export class HrWebController {
   }
 
   @Patch('leaves/:id/reject')
-  @UseGuards(JwtAuthGuard)
   async rejectLeave(
     @Param('id') leaveId: string,
     @Body('remarks') remarks: string,
@@ -117,7 +128,6 @@ export class HrWebController {
   }
 
   @Get('leaves/historical')
-  @UseGuards(JwtAuthGuard)
   async getHistoricalLeaves(
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
@@ -146,7 +156,6 @@ export class HrWebController {
   }
 
   @Get('employees/leadership')
-  @UseGuards(JwtAuthGuard)
   async getLeadership() {
     const leadership = await this.employeeService.getLeadership();
 
@@ -158,7 +167,6 @@ export class HrWebController {
   }
 
   @Get('employees/new-code')
-  @UseGuards(JwtAuthGuard)
   async getNewEmployeeCode() {
     const newCode = await this.employeeService.generateNewEmployeeCode();
 
@@ -170,7 +178,6 @@ export class HrWebController {
   }
 
   @Post('employees/create')
-  @UseGuards(JwtAuthGuard)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'profileImage', maxCount: 1 },
@@ -205,7 +212,6 @@ export class HrWebController {
   }
 
   @Put('employees/:id')
-  @UseGuards(JwtAuthGuard)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'profileImage', maxCount: 1 },
@@ -230,7 +236,6 @@ export class HrWebController {
 
   // Approve an incoming claim
   @Patch('reimbursement/:id/approve')
-  @UseGuards(JwtAuthGuard)
   async approveReimbursement(
     @Param('id') id: string,
     @Req() req: any
@@ -244,7 +249,6 @@ export class HrWebController {
 
   // Reject an incoming claim with a mandatory justification reason
   @Patch('reimbursement/:id/reject')
-  @UseGuards(JwtAuthGuard)
   async rejectReimbursement(
     @Param('id') id: string,
     @Body() body: { rejectionReason: string },
@@ -259,7 +263,6 @@ export class HrWebController {
 
 
   @Get('get-profile')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async getProfile() {
     return await this.hrService.getMasterProfile();
@@ -269,7 +272,6 @@ export class HrWebController {
    * Updates the underlying employee password shared across both profiles
    */
   @Patch('change-password')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async changePassword(@Body() changePasswordDto: ChangePasswordDto) {
     return await this.hrService.changeMasterPassword(changePasswordDto);
@@ -278,13 +280,11 @@ export class HrWebController {
 
   // ─── GET LIVE COMPLAINTS (Pending, Acknowledged, In Review) ───
   @Get('complaints/live')
-  @UseGuards(JwtAuthGuard)
   async getLiveComplaints(@Query('search') search?: string) {
     return await this.complaintService.getHrLiveComplaints(search);
   }
 
   @Get('complaints/historical')
-  @UseGuards(JwtAuthGuard)
   async getHistoricalComplaints(
     @Query('search') search?: string) {
     return await this.complaintService.getHistoricalComplaintsForHr(search);
@@ -292,7 +292,6 @@ export class HrWebController {
 
 
   @Patch('complaints/:id/status')
-  @UseGuards(JwtAuthGuard)
   async updateComplaintStatus(
     @Param('id') complaintId: string,
     @Body() body: Omit<UpdateComplaintStatusDto, 'actionBy' | 'role'>, // Frontend doesn't send these securely
@@ -311,6 +310,36 @@ export class HrWebController {
 
     // 3. Call your existing service method
     return await this.complaintService.updateStatus(complaintId, updateDto);
+  }
+
+  @Post('holidays')
+  async create(@Body() createHolidayDto: CreateHolidayDto, @Req() req: any) {
+
+    const data = await this.holidayService.create(createHolidayDto);
+    return { success: true, message: 'Holiday added to calendar', data };
+  }
+
+  @Delete('holidays/:id')
+  async remove(@Param('id') id: string) {
+    // Triggers the Soft Delete
+    const result = await this.holidayService.softDelete(id);
+    return { success: true, ...result };
+  }
+
+  @Post('announcements/upsert')
+  @ApiOperation({ summary: 'Create or update an announcement (HR/Admin)' })
+  @ApiResponse({ status: 201, description: 'The alert has been successfully saved.' })
+  async upsertGlobalAlert(
+    @Body() dto: UpsertAlertDto
+  ) {
+    // The service handles resolving the HR employeeId automatically via getMasterProfile
+    const updatedAlert = await this.alertService.upsertAlert(dto);
+
+    return {
+      success: true,
+      message: 'Announcement saved successfully',
+      data: updatedAlert,
+    };
   }
 
 }

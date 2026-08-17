@@ -1,16 +1,24 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { ClientSession, Model } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { Holiday } from './schemas/holiday.schema';
 import { CreateHolidayDto } from './dto/create-holiday.dto';
+import { HrService } from '../hr/hr.service';
 
 @Injectable()
 export class HolidayService {
     constructor(
         @InjectModel(Holiday.name) private holidayModel: Model<Holiday>,
+        @Inject(forwardRef(() => HrService)) private readonly hrService: HrService,
     ) { }
 
-    async create(createHolidayDto: CreateHolidayDto, adminId: string) {
+    async create(createHolidayDto: CreateHolidayDto) {
+        const hrProfile = await this.hrService.getMasterProfile();
+
+        // Extract the ID from employeeAccount and convert to a Mongoose ObjectId
+        const rawId = hrProfile?.employeeAccount?._id || hrProfile?.employeeId;
+        const employeeObjectId = new Types.ObjectId(rawId);
+
         const holidayDate = new Date(createHolidayDto.date);
         const year = holidayDate.getFullYear();
 
@@ -19,11 +27,12 @@ export class HolidayService {
                 ...createHolidayDto,
                 date: holidayDate,
                 year: year,
-                createdBy: adminId, // Injected securely from token
+                createdBy: employeeObjectId,
                 isActive: true,
             });
 
-            return await newHoliday.save();
+            const savedHoliday = await newHoliday.save();
+            return await savedHoliday.populate('createdBy', 'name');
         } catch (error: any) {
             if (error.code === 11000) {
                 throw new ConflictException('This exact holiday already exists on this date.');
@@ -35,9 +44,10 @@ export class HolidayService {
     // Frontend will mostly use this to get a specific year's calendar
     async findAllByYear(year: number) {
         return await this.holidayModel
-            .find({ year, isActive: true })
-            .sort({ date: -1 })
-            .populate('createdBy', 'name');
+            .find({ year })
+            .sort({ date: 1 }) // Sorted chronologically (Jan -> Dec)
+            .populate('createdBy', 'name')
+            .lean();
     }
 
     // SOFT DELETE

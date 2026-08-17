@@ -1,16 +1,19 @@
-import { IsString, IsNotEmpty, IsEnum, IsOptional, IsDateString } from 'class-validator';
+import { IsNotEmpty, IsString, IsEnum, IsOptional, IsDateString } from 'class-validator';
 
 export class CreateHolidayDto {
+  @IsNotEmpty()
   @IsDateString()
-  @IsNotEmpty()
-  date!: string; // ISO Date string from the frontend
+  date!: string;
 
-  @IsString()
   @IsNotEmpty()
+  @IsString()
   name!: string;
 
-  @IsEnum(['National', 'Company-specific'])
-  type!: string;
+  @IsNotEmpty()
+  @IsEnum(['National', 'Company-specific'], {
+    message: 'Type must be either "National" or "Company-specific"',
+  })
+  type!: 'National' | 'Company-specific';
 
   @IsOptional()
   @IsString()

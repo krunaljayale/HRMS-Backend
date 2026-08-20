@@ -39,6 +39,9 @@ import { HolidayService } from '../holiday/holiday.service';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { UpsertAlertDto } from '../alert/dto/upsert-alert.dto';
 import { AlertService } from '../alert/alert.service';
+import { GurukulService } from '../gurukul/gurukul.service';
+import { GetVideosDto } from '../gurukul/dto/get-videos.dto';
+import { CreateVideoDto, UpdateVideoDto } from '../gurukul/dto/create-gurukul.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('api/web/hr')
@@ -50,11 +53,13 @@ export class HrWebController {
     private readonly leaveService: LeaveService,
     private readonly reimbursementService: ReimbursementService,
     private readonly complaintService: ComplaintService,
-    @Inject(forwardRef(() => HolidayService)) 
+    @Inject(forwardRef(() => HolidayService))
     private readonly holidayService: HolidayService,
-    
-    @Inject(forwardRef(() => AlertService)) 
+
+    @Inject(forwardRef(() => AlertService))
     private readonly alertService: AlertService,
+
+    private readonly gurukulService: GurukulService,
   ) { }
 
   @Patch('attendance/corrections/:id/approve')
@@ -340,6 +345,24 @@ export class HrWebController {
       message: 'Announcement saved successfully',
       data: updatedAlert,
     };
+  }
+
+  // Gurukul Video Management Endpoints
+
+  @Post('gurukul/videos')
+  async createVideo(@Req() req, @Body() createVideoDto: CreateVideoDto) {
+    console.log('Received request to create video:', createVideoDto);
+    return await this.gurukulService.createVideo(createVideoDto);
+  }
+
+  @Put('gurukul/videos/:id')
+  async updateVideo(@Param('id') id: string, @Body() updateVideoDto: UpdateVideoDto) {
+    return await this.gurukulService.updateVideo(id, updateVideoDto);
+  }
+
+  @Delete('gurukul/videos/:id')
+  async deleteVideo(@Param('id') id: string) {
+    return await this.gurukulService.deleteVideo(id);
   }
 
 }

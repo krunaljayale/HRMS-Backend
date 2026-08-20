@@ -5,6 +5,7 @@ import { ReimbursementAppController } from './reimbursement.app.controller';
 import { Reimbursement, ReimbursementSchema } from './schemas/reimbursement.schema';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { EmployeeModule } from '../employee/employee.module';
+import { ReimbursementWebController } from './reimbursement.web.controller';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { EmployeeModule } from '../employee/employee.module';
     CloudinaryModule,
     EmployeeModule,
   ],
-  controllers: [ReimbursementAppController],
+  controllers: [ReimbursementAppController, ReimbursementWebController],
   providers: [ReimbursementService],
   exports: [ReimbursementService],
 })

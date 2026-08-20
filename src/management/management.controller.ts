@@ -11,6 +11,8 @@ import { ReimbursementService } from '../reimbursement/reimbursement.service';
 import { HolidayService } from '../holiday/holiday.service';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AlertService } from '../alert/alert.service';
+import { GetVideosDto } from '../gurukul/dto/get-videos.dto';
+import { GurukulService } from '../gurukul/gurukul.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('api/web/management')
@@ -23,6 +25,7 @@ export class ManagementController {
     private readonly reimbursementService: ReimbursementService,
     private readonly holidayService: HolidayService,
     private readonly alertService: AlertService,
+    private readonly gurukulService: GurukulService,
   ) { }
 
   @Get('get-general-stats')
@@ -292,6 +295,11 @@ export class ManagementController {
       message: 'Alerts fetched successfully',
       data: alerts,
     };
+  }
+
+  @Get('gurukul/videos')
+  async getVideos(@Query() queryDto: GetVideosDto) {
+    return await this.gurukulService.getPaginatedVideos(queryDto);
   }
 
 }

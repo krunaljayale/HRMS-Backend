@@ -1,3 +1,4 @@
+// video.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import mongoosePaginate from 'mongoose-paginate-v2';
@@ -12,11 +13,17 @@ export class Video {
     @Prop({ trim: true })
     description!: string;
 
+    // Renamed for better context
     @Prop({ required: true })
-    cloudinaryUrl!: string;
+    videoUrl!: string;
 
-    @Prop({ required: true })
-    publicId!: string;
+    // New field to determine which player to use on the frontend
+    @Prop({ required: true, enum: ['youtube', 'direct'], default: 'direct' })
+    videoType!: 'youtube' | 'direct';
+
+    // Made optional since YouTube links won't have a Cloudinary publicId
+    @Prop()
+    publicId?: string;
 
     @Prop()
     duration!: number; // in seconds
@@ -24,7 +31,6 @@ export class Video {
     @Prop()
     thumbnail!: string;
 
-    // References the Employee collection
     @Prop({ type: Types.ObjectId, ref: 'Employee', required: true })
     createdBy!: Types.ObjectId;
 
@@ -33,14 +39,9 @@ export class Video {
 }
 
 export const VideoSchema = SchemaFactory.createForClass(Video);
-
-// ✅ Attach the pagination plugin
 VideoSchema.plugin(mongoosePaginate);
-
-// ✅ Clean JSON response
 VideoSchema.set('toJSON', {
     transform: (doc, ret) => {
-        // Cast to Record<string, any> to allow deletion
         const finalObject = ret as Record<string, any>;
         delete finalObject.__v;
         return finalObject;

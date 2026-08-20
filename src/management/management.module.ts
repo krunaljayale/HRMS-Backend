@@ -8,6 +8,7 @@ import { PayrollModule } from '../payroll/payroll.module';
 import { ReimbursementModule } from '../reimbursement/reimbursement.module';
 import { HolidayModule } from '../holiday/holiday.module';
 import { AlertModule } from '../alert/alert.module';
+import { GurukulModule } from '../gurukul/gurukul.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AlertModule } from '../alert/alert.module';
     ReimbursementModule,
     HolidayModule,
     AlertModule,
+    GurukulModule,
   ],
   controllers: [ManagementController],
   providers: [ManagementService],

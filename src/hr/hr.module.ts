@@ -11,10 +11,10 @@ import { ReimbursementModule } from '../reimbursement/reimbursement.module';
 import { ComplaintModule } from '../complaint/complaint.module';
 import { HolidayModule } from '../holiday/holiday.module';
 import { AlertModule } from '../alert/alert.module';
+import { GurukulModule } from '../gurukul/gurukul.module';
 
 @Module({
   imports: [
-    // This line registers the schema with MongoDB for this specific module
     MongooseModule.forFeature([{ name: HrProfile.name, schema: HrProfileSchema }]),
     EmployeeModule,
     AttendanceModule,
@@ -24,6 +24,7 @@ import { AlertModule } from '../alert/alert.module';
     ComplaintModule,
     forwardRef(() => AlertModule),
     forwardRef(() => HolidayModule),
+    forwardRef(() => GurukulModule),
   ],
   controllers: [HrWebController],
   providers: [HrService],

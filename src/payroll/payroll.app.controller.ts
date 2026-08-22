@@ -7,18 +7,20 @@ import {
   BadRequestException,
   Get,
   Query,
-  Param
+  Param,
+  Res
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { PayrollService } from './payroll.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GetPayrollListQueryDto } from './dto/get-payroll-list.dto';
 
+@UseGuards(JwtAuthGuard)
 @Controller('api/app/payroll')
 export class PayrollAppController {
   constructor(private readonly payrollService: PayrollService) { }
 
   // ─── GENERATE PAYROLL ENDPOINT ───
-  @UseGuards(JwtAuthGuard)
   @Post('generate')
   async generatePayroll(@Req() req: any, @Body() body: any) {
     const { employeeId, month, year, startDate, endDate } = body;
@@ -69,7 +71,6 @@ export class PayrollAppController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get('list')
   async getPayrollList(@Req() req: any, @Query() query: GetPayrollListQueryDto) {
     const result = await this.payrollService.getPayrollList(req.user, query);
@@ -82,7 +83,6 @@ export class PayrollAppController {
   }
 
   // ── EMPLOYEE PREVIEW ENDPOINT ──
-  @UseGuards(JwtAuthGuard)
   @Post('preview')
   async previewMyPayroll(@Req() req: any, @Body() body: any) {
     // 1. Extract and Validate
@@ -115,7 +115,6 @@ export class PayrollAppController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get(':id/details')
   async getPayrollDetails(@Req() req: any, @Param('id') payrollId: string) {
     const targetEmployeeId = req.user.employeeId;
@@ -138,5 +137,27 @@ export class PayrollAppController {
       data: details,
       message: 'Statement details fetched successfully',
     };
+  }
+
+  @Get(':id/download')
+  async downloadPayslip(
+    @Param('id') payrollId: string,
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    const employeeId = req.user.employeeId;
+
+    // 1. Generate the PDF buffer from your service
+    const pdfBuffer = await this.payrollService.generateSalarySlipPdf(payrollId, employeeId);
+
+    // 2. Set the strict headers required for binary PDF transfer
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Payslip.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+
+    // 3. Send the raw buffer to the client
+    res.end(pdfBuffer);
   }
 }

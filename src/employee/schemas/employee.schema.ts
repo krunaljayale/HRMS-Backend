@@ -125,8 +125,11 @@ export class Employee extends Document {
     pincode?: string;
 
     // ── JOB DETAILS ──
-    @Prop()
+    @Prop({ index: true })
     joiningDate?: Date;
+
+    @Prop({ index: true })
+    employmentDate?: Date;
 
     @Prop({ trim: true })
     department?: string;

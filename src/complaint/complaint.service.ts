@@ -16,8 +16,12 @@ export class ComplaintService {
         private readonly notificationService: NotificationService,
     ) { }
 
-    private async fetchComplaintsByStatusList(statuses: string[], search?: string) {
+    private async fetchComplaintsByStatusList(statuses: string[], search?: string, priorities?: string[]) {
         const filter: any = { status: { $in: statuses } };
+
+        if (priorities && priorities.length > 0) {
+            filter.priority = { $in: priorities };
+        }
 
         if (search && search.trim() !== '') {
             const regex = new RegExp(search.trim(), 'i');
@@ -242,7 +246,9 @@ export class ComplaintService {
 
     async getHrLiveComplaints(search?: string) {
         const liveStatuses = ['Pending', 'Acknowledged', 'In Review'];
-        return await this.fetchComplaintsByStatusList(liveStatuses, search);
+        const hrPriorities = ['Low', 'Medium'];
+
+        return await this.fetchComplaintsByStatusList(liveStatuses, search, hrPriorities);
     }
 
     async getHistoricalComplaintsForHr(searchQuery?: string) {

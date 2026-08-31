@@ -20,6 +20,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReimbursementModule } from './reimbursement/reimbursement.module';
 import { DirectorModule } from './director/director.module';
 import { ManagementModule } from './management/management.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -37,6 +38,8 @@ import { ManagementModule } from './management/management.module';
         uri: configService.get<string>('MONGO_URI'),
       }),
     }),
+
+    ScheduleModule.forRoot(),
 
     EmployeeModule,
 

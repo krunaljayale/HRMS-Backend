@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, BadRequestException, InternalServerErrorException, forwardRef, Inject, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { LeaveHistory, LeaveHistoryDocument } from './schemas/leave-history.schema';
@@ -8,9 +8,12 @@ import { LeaveLedger, LeaveLedgerDocument } from './schemas/leave-ledger.schema'
 import { createTodayISTThreshold, getIST } from '../utils/time.utils';
 import { NotificationService } from '../notification/notification.service';
 import { ClientSession } from 'mongoose';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class LeaveService {
+
+    private readonly logger = new Logger(LeaveService.name);
     constructor(
         @InjectModel(LeaveHistory.name) private leaveHistoryModel: Model<LeaveHistoryDocument>,
         @InjectModel(LeaveLedger.name) private leaveLedgerModel: Model<LeaveLedgerDocument>,
@@ -18,6 +21,108 @@ export class LeaveService {
         private readonly employeeService: EmployeeService,
         private readonly notificationService: NotificationService,
     ) { }
+
+
+    @Cron('0 0 1 * *', {
+        name: 'monthly-paid-leave-accrual',
+        timeZone: 'Asia/Kolkata',
+    })
+    async handleMonthlyPaidLeaveAccrual(): Promise<void> {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+        const fixedAllowanceMonth = `${currentYear}-${currentMonth}`;
+
+        const sixMonthsAgoCutoff = new Date(now);
+        sixMonthsAgoCutoff.setMonth(sixMonthsAgoCutoff.getMonth() - 6);
+        sixMonthsAgoCutoff.setHours(23, 59, 59, 999);
+
+        const session = await this.leaveLedgerModel.db.startSession();
+
+        try {
+            // 1. Fetch eligible employees
+            const eligibleEmployees = await this.employeeService.findEligibleForLeaveAccrual(sixMonthsAgoCutoff);
+
+            if (!eligibleEmployees.length) {
+                this.logger.log('No eligible employees found for monthly leave accrual.');
+                return;
+            }
+
+            // 2. Prepare bulk operations
+            const bulkOps = eligibleEmployees.map((emp) => ({
+                updateOne: {
+                    filter: {
+                        employeeId: emp._id,
+                        leaveType: 'Paid',
+                        fixedAllowanceMonth: fixedAllowanceMonth,
+                    },
+                    update: {
+                        $setOnInsert: {
+                            employeeId: emp._id,
+                            leaveType: 'Paid',
+                            status: 'Active',
+                            fixedAllowanceMonth: fixedAllowanceMonth,
+                            value: 1,
+                        },
+                    },
+                    upsert: true,
+                },
+            }));
+
+            // 3. Execute bulk write within an atomic transaction
+            session.startTransaction();
+
+            const result = await this.leaveLedgerModel.bulkWrite(bulkOps, { session });
+            await session.commitTransaction();
+
+            this.logger.log(
+                `Monthly paid leave accrual complete: ${result.upsertedCount} tokens issued for ${fixedAllowanceMonth}.`,
+            );
+
+            // [NEW SAFEGUARD]: If no new tokens were inserted (e.g., this is an accidental duplicate run), stop here.
+            if (result.upsertedCount === 0) {
+                this.logger.log('No new leave tokens were inserted. Skipping notifications.');
+                return;
+            }
+
+            // 4. Dispatch FCM Notifications in chunks to prevent memory spikes/rate limits
+            const eligibleWithTokens = eligibleEmployees.filter(
+                (emp) => typeof emp.fcmToken === 'string' && emp.fcmToken.trim().length > 0,
+            );
+
+            if (eligibleWithTokens.length > 0) {
+                const CHUNK_SIZE = 500; // Firebase can handle 500 easily
+
+                for (let i = 0; i < eligibleWithTokens.length; i += CHUNK_SIZE) {
+                    const chunk = eligibleWithTokens.slice(i, i + CHUNK_SIZE);
+
+                    const notificationPromises = chunk.map((emp) =>
+                        this.notificationService.sendToEmployee({
+                            token: emp.fcmToken!,
+                            title: 'Paid Leave Credited 🎉',
+                            body: `Hi ${emp.name}, your 1 Paid Leave token for ${fixedAllowanceMonth} has been added.`,
+                            data: {
+                                type: 'LEAVE_ACCRUAL',
+                                month: fixedAllowanceMonth,
+                            },
+                        }),
+                    );
+
+                    await Promise.allSettled(notificationPromises);
+                }
+
+                this.logger.log(`Dispatched leave accrual notifications to ${eligibleWithTokens.length} employees.`);
+            }
+        } catch (error: any) {
+            if (session.inTransaction()) {
+                await session.abortTransaction();
+            }
+            this.logger.error(`Accrual transaction failed & rolled back: ${error.message}`, error.stack);
+        } finally {
+            await session.endSession();
+        }
+    }
+
 
     // ROUTING ENGINE ──
     private buildWorkflowRoute(isLeadership: boolean, managerId?: Types.ObjectId): IWorkflowStep[] {

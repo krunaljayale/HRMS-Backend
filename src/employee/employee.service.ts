@@ -140,6 +140,23 @@ export class EmployeeService {
     return employees.map((e) => e._id as Types.ObjectId);
   }
 
+  async findEligibleForLeaveAccrual(cutoffDate: Date) {
+    return this.employeeModel
+      .find({
+        role: 'Employee',
+        status: 'Active',
+        $or: [
+          { employmentDate: { $lte: cutoffDate } },
+          {
+            employmentDate: { $exists: false },
+            joiningDate: { $lte: cutoffDate },
+          },
+        ],
+      })
+      .select('_id employeeCode name fcmToken')
+      .lean();
+  }
+
   // ─── FETCH ONLY ACTIVE EMPLOYEES (Optional Helper) ───────────
   /**
    * A cleaner alternative if you prefer not to pass the filter object
@@ -774,7 +791,7 @@ export class EmployeeService {
 
     // Remove empty/undefined properties to prevent overwriting existing DB data with nulls
     Object.keys(sanitizedData).forEach((key) => {
-      if (sanitizedData[key] === undefined || sanitizedData[key] === '') {
+      if (sanitizedData[key] === undefined) {
         delete sanitizedData[key];
       }
     });

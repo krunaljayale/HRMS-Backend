@@ -348,7 +348,6 @@ export class HrWebController {
   }
 
   // Gurukul Video Management Endpoints
-
   @Post('gurukul/videos')
   async createVideo(@Req() req, @Body() createVideoDto: CreateVideoDto) {
     console.log('Received request to create video:', createVideoDto);

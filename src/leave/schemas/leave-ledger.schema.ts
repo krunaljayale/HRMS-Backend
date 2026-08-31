@@ -13,7 +13,7 @@ export class LeaveLedger {
     leaveType!: string;
 
     // The current state of this specific token
-    @Prop({ required: true, default: 'Active', enum: ['Active','Locked', 'Consumed', 'Expired'] })
+    @Prop({ required: true, default: 'Active', enum: ['Active', 'Locked', 'Consumed', 'Expired'] })
     status!: string;
 
     // ── ORIGIN METADATA (Where did this token come from?) ──
@@ -33,5 +33,8 @@ export class LeaveLedger {
 
 export const LeaveLedgerSchema = SchemaFactory.createForClass(LeaveLedger);
 
-// Optimized index for instantly counting how many 'Active' tokens an employee has
-LeaveLedgerSchema.index({ employeeId: 1, leaveType: 1, status: 1 });
+// Database-level protection against duplicate monthly credits
+LeaveLedgerSchema.index(
+    { employeeId: 1, leaveType: 1, fixedAllowanceMonth: 1 },
+    { unique: true, sparse: true }
+);

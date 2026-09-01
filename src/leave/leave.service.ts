@@ -28,19 +28,35 @@ export class LeaveService {
         timeZone: 'Asia/Kolkata',
     })
     async handleMonthlyPaidLeaveAccrual(): Promise<void> {
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-        const fixedAllowanceMonth = `${currentYear}-${currentMonth}`;
+        // 1. Force IST Date evaluation
+        // 'en-CA' outputs ISO standard "YYYY-MM-DD"
+        const istDateString = new Date().toLocaleDateString('en-CA', {
+            timeZone: 'Asia/Kolkata',
+        }); // Returns "2026-09-01" at 00:00 IST
 
-        const sixMonthsAgoCutoff = new Date(now);
-        sixMonthsAgoCutoff.setMonth(sixMonthsAgoCutoff.getMonth() - 6);
-        sixMonthsAgoCutoff.setHours(23, 59, 59, 999);
+        const [currentYear, currentMonth] = istDateString.split('-');
+        const fixedAllowanceMonth = `${currentYear}-${currentMonth}`; // "2026-09"
+
+        // 2. Calculate 6-month cutoff based on IST date
+        const cutoffYear = Number(currentYear);
+        const cutoffMonth = Number(currentMonth) - 1; // 0-indexed month
+
+        // Create date at 23:59:59.999 IST 6 months ago
+        // IST is UTC+05:30 -> ISO string adjustment
+        const sixMonthsAgo = new Date(Date.UTC(cutoffYear, cutoffMonth - 6, 1));
+        const sixMonthsAgoCutoff = new Date(
+            sixMonthsAgo.getFullYear(),
+            sixMonthsAgo.getMonth() + 1,
+            0,
+            23,
+            59,
+            59,
+            999,
+        );
 
         const session = await this.leaveLedgerModel.db.startSession();
 
         try {
-            // 1. Fetch eligible employees
             const eligibleEmployees = await this.employeeService.findEligibleForLeaveAccrual(sixMonthsAgoCutoff);
 
             if (!eligibleEmployees.length) {
@@ -48,7 +64,6 @@ export class LeaveService {
                 return;
             }
 
-            // 2. Prepare bulk operations
             const bulkOps = eligibleEmployees.map((emp) => ({
                 updateOne: {
                     filter: {
@@ -69,7 +84,6 @@ export class LeaveService {
                 },
             }));
 
-            // 3. Execute bulk write within an atomic transaction
             session.startTransaction();
 
             const result = await this.leaveLedgerModel.bulkWrite(bulkOps, { session });
@@ -79,19 +93,23 @@ export class LeaveService {
                 `Monthly paid leave accrual complete: ${result.upsertedCount} tokens issued for ${fixedAllowanceMonth}.`,
             );
 
-            // [NEW SAFEGUARD]: If no new tokens were inserted (e.g., this is an accidental duplicate run), stop here.
             if (result.upsertedCount === 0) {
                 this.logger.log('No new leave tokens were inserted. Skipping notifications.');
                 return;
             }
 
-            // 4. Dispatch FCM Notifications in chunks to prevent memory spikes/rate limits
-            const eligibleWithTokens = eligibleEmployees.filter(
+            // 3. Filter ONLY employees whose records were actually newly inserted
+            const upsertedIndices = new Set(Object.keys(result.upsertedIds || {}).map(Number));
+            const actuallyInsertedEmployees = eligibleEmployees.filter((_, index) =>
+                upsertedIndices.has(index),
+            );
+
+            const eligibleWithTokens = actuallyInsertedEmployees.filter(
                 (emp) => typeof emp.fcmToken === 'string' && emp.fcmToken.trim().length > 0,
             );
 
             if (eligibleWithTokens.length > 0) {
-                const CHUNK_SIZE = 500; // Firebase can handle 500 easily
+                const CHUNK_SIZE = 500;
 
                 for (let i = 0; i < eligibleWithTokens.length; i += CHUNK_SIZE) {
                     const chunk = eligibleWithTokens.slice(i, i + CHUNK_SIZE);
@@ -111,7 +129,9 @@ export class LeaveService {
                     await Promise.allSettled(notificationPromises);
                 }
 
-                this.logger.log(`Dispatched leave accrual notifications to ${eligibleWithTokens.length} employees.`);
+                this.logger.log(
+                    `Dispatched leave accrual notifications to ${eligibleWithTokens.length} employees.`,
+                );
             }
         } catch (error: any) {
             if (session.inTransaction()) {

@@ -16,7 +16,7 @@ async function run() {
   const notificationService = app.get(NotificationService);
 
   const isSent = await notificationService.sendToEmployee({
-    token: 'du4Wd58oQkKpNzJSZJ3JxT:APA91bGJy64o3QSbCSbBCDvYOviB4lpfGnsmVLhxBkm50VFcWjqd0_NGcdt1i9UyxWTgzRrowl4FTo1vGfUkZ6L0rzVv0GXvU29lBTgH69gKMx-OnlTfVT4',
+    token: 'eBIEzBllQsGVwJftnqiDAo:APA91bGaZCPao4OZQsulvCMqnc6M6bCCJgoRcGrFuGo7R5jp1j7NFRIWVBRfaQ-mPnfJ9QMri3GZTAiYs4lo2s-vGfv3iZ-attxqCB634yEw-62Mnr_fUMo',
     title: '⚠️ Attendance Alert: Invalid Check-in Location',
     body: "Your check-in was detected outside designated office premises. Today's attendance will not be counted toward payroll. For discrepancies, contact your reporting manager.",
     channelId: 'hrms-attendance-alerts',

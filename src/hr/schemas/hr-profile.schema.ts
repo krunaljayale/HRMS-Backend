@@ -14,6 +14,9 @@ export class HrProfile {
     @Prop({ default: true })
     isActive!: boolean;
 
+    @Prop({ required: true, select: false })
+    password!: string;
+
     // ── TYPE HINTS FOR TYPESCRIPT COMPILER ──
     // Declaring these lets TS know they exist on instances of HrProfileDocument
     // without interfering with Mongoose's runtime automatic timestamp generation.
